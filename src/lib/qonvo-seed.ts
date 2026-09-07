@@ -1,4 +1,5 @@
-import type { Campaign, Join, Note, Post } from "@/lib/qonvo-data";
+import type { Campaign, Join, MusicTrack, Note, Post } from "@/lib/qonvo-data";
+import { parseMusicUrl } from "@/lib/qonvo-data";
 
 function poster(bg: string, label: string) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="360"><rect fill="${bg}" width="800" height="360"/><text x="36" y="196" fill="#f3f3f0" font-size="34" font-family="Segoe UI,sans-serif">${label}</text></svg>`;
@@ -138,3 +139,132 @@ export const DEMO_NOTES: Note[] = [
   { id: "dn4", text: "New feed posted: “Best jollof is not even a debate”", ts: Date.now() - 7200_000 },
   { id: "dn5", text: "Amaka#2201 joined Nigeria", ts: Date.now() - 120_000 },
 ];
+
+function track(partial: Omit<MusicTrack, "embed" | "platform" | "url"> & { url: string }): MusicTrack {
+  const parsed = parseMusicUrl(partial.url);
+  return {
+    ...partial,
+    url: parsed?.url ?? partial.url,
+    platform: parsed?.platform ?? "Link",
+    embed: parsed?.embed,
+  };
+}
+
+export const DEMO_TRACKS: MusicTrack[] = [
+  track({
+    id: "demo-track-1",
+    title: "Ye",
+    artist: "Burna Boy",
+    url: "https://open.spotify.com/track/0Lz23DJfAk0YbdBFjyj3vd",
+    cover: poster("#14351f", "Ye"),
+    genre: "Afrobeats",
+    album: "Outside",
+    author: "Kemi#0092",
+    ts: Date.now() - 4000_000,
+  }),
+  track({
+    id: "demo-track-2",
+    title: "Essence",
+    artist: "Wizkid",
+    url: "https://open.spotify.com/track/5uU1uuyaUIBOiiUSQG7Wl3",
+    cover: poster("#1a2744", "Essence"),
+    genre: "Afrobeats",
+    author: "Amaka#2201",
+    ts: Date.now() - 8000_000,
+  }),
+  track({
+    id: "demo-track-3",
+    title: "Calm Down",
+    artist: "Rema",
+    url: "https://open.spotify.com/track/0WtM2NBVQNNJLh6XYJR5Te",
+    cover: poster("#3b2a16", "Calm Down"),
+    genre: "Afrobeats",
+    author: "Chidi#4410",
+    ts: Date.now() - 12000_000,
+  }),
+];
+
+export const DIGITAL_TRACKS: MusicTrack[] = [
+  track({
+    id: "dig-1",
+    title: "Love Nwantiti",
+    artist: "CKay",
+    url: "https://open.spotify.com/track/2eSW2VG9nzt1KtJIp9QqXH",
+    cover: poster("#2a2438", "CKay"),
+    genre: "Afrobeats",
+    author: "Spotify",
+    ts: Date.now() - 5000_000,
+  }),
+  track({
+    id: "dig-2",
+    title: "Last Last",
+    artist: "Burna Boy",
+    url: "https://open.spotify.com/track/1bDbXMyjaUIooNwFEFXJTC",
+    cover: poster("#14351f", "Last Last"),
+    genre: "Afrobeats",
+    author: "Spotify",
+    ts: Date.now() - 6000_000,
+  }),
+  track({
+    id: "dig-3",
+    title: "Peru",
+    artist: "Fireboy DML",
+    url: "https://open.spotify.com/track/7uoFMmxb0vgJfB9e0o5xjm",
+    cover: poster("#1a2744", "Peru"),
+    genre: "Afrobeats",
+    author: "Spotify",
+    ts: Date.now() - 7000_000,
+  }),
+  track({
+    id: "dig-4",
+    title: "Unavailable",
+    artist: "Davido",
+    url: "https://open.spotify.com/track/3nqQXoyQOWXiESQjSNW8eK",
+    cover: poster("#3b2a16", "Unavailable"),
+    genre: "Afrobeats",
+    author: "Spotify",
+    ts: Date.now() - 8000_000,
+  }),
+];
+
+export const VIDEO_SECTIONS = [
+  "Movies",
+  "Nollywood",
+  "Trailers",
+  "Music videos",
+  "Comedy",
+  "Sports",
+  "News",
+  "Documentary",
+  "Shorts",
+  "Interviews",
+  "Kids",
+] as const;
+
+export const VIDEO_CATALOG: Record<string, { id: string; title: string }[]> = {
+  Movies: [
+    { id: "xjDjIWPwcPU", title: "Black Panther — trailer" },
+    { id: "_Z3QKkl1WyM", title: "Wakanda Forever — trailer" },
+    { id: "3RDaPV_rJ1Y", title: "The Woman King — trailer" },
+    { id: "sYc1gUwXJk0", title: "Coming 2 America — trailer" },
+  ],
+  Nollywood: [
+    { id: "lQjFGCqE_6E", title: "The Black Book — trailer" },
+    { id: "oqkz5k3f1nA", title: "King of Boys — trailer" },
+  ],
+  Trailers: [
+    { id: "TcMBFSGVi1c", title: "Avengers Endgame — trailer" },
+    { id: "8g18jFHCLXk", title: "Dune — trailer" },
+  ],
+  "Music videos": [
+    { id: "iuoQyKbwzN0", title: "Burna Boy — Ye" },
+    { id: "CQLsdm1ZYAw", title: "Rema — Calm Down" },
+  ],
+  Comedy: [{ id: "5qap5aO4i9A", title: "Live sample" }],
+  Sports: [{ id: "Nq4NIpj9K0I", title: "Sports clip" }],
+  News: [{ id: "9Auq9mYxFEE", title: "News clip" }],
+  Documentary: [{ id: "5qap5aO4i9A", title: "Doc sample" }],
+  Shorts: [{ id: "CQLsdm1ZYAw", title: "Short clip" }],
+  Interviews: [{ id: "iuoQyKbwzN0", title: "Interview sample" }],
+  Kids: [{ id: "sYc1gUwXJk0", title: "Family trailer" }],
+};

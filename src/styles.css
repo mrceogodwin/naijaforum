@@ -1,7 +1,5 @@
 @import "tailwindcss";
 
-@import "tailwindcss";
-
 @theme {
   --color-bg: #070707;
   --color-panel: #121212;
@@ -25,6 +23,24 @@
     overflow: hidden;
     background: var(--color-bg);
     color: var(--color-fg);
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a2a #070707;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a2a #070707;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: #070707;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #2a2a2a;
+    border-radius: 8px;
+    border: 2px solid #070707;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {

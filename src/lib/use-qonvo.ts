@@ -8,11 +8,13 @@ import {
   type Campaign,
   type ChatMsg,
   type Join,
+  type MusicTrack,
   type Note,
   type Post,
+  parseMusicUrl,
   type Team,
 } from "@/lib/qonvo-data";
-import { DEMO_ADS, DEMO_JOINS, DEMO_NOTES, DEMO_POSTS } from "@/lib/qonvo-seed";
+import { DEMO_ADS, DEMO_JOINS, DEMO_NOTES, DEMO_POSTS, DEMO_TRACKS } from "@/lib/qonvo-seed";
 
 function guestName() {
   return `Guest#${Math.floor(1000 + Math.random() * 9000)}`;
@@ -20,6 +22,10 @@ function guestName() {
 
 function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function passKey(name: string, pass: string) {
+  return `${name.toLowerCase()}::${pass}`;
 }
 
 export function useQonvo() {
@@ -33,7 +39,11 @@ export function useQonvo() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [joins, setJoins] = useState<Join[]>([]);
+  const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [openPost, setOpenPost] = useState<string | null>(null);
+  const [openTrack, setOpenTrack] = useState<string | null>(null);
+  const [authed, setAuthed] = useState(false);
+  const [authErr, setAuthErr] = useState("");
 
   const persistNotes = useCallback((next: Note[]) => {
     setNotes(next);
@@ -54,12 +64,17 @@ export function useQonvo() {
     const ads0 = loadJson<Campaign[]>("ads", []);
     const notes0 = loadJson<Note[]>("notes", []);
     const joins0 = loadJson<Join[]>("joins", []);
-    const posts = DEMO_POSTS.some((d) => posts0.some((p) => p.id === d.id))
-      ? posts0
-      : [...DEMO_POSTS, ...posts0];
-    const ads = DEMO_ADS.some((d) => ads0.some((p) => p.id === d.id))
-      ? ads0
-      : [...DEMO_ADS, ...ads0];
+    const posts = [
+      ...DEMO_POSTS.filter((d) => !posts0.some((p) => p.id === d.id)),
+      ...posts0.map((p) => {
+        const demo = DEMO_POSTS.find((d) => d.id === p.id);
+        return demo ? { ...p, image: demo.image } : p;
+      }),
+    ];
+    const ads = [
+      ...DEMO_ADS.filter((d) => !ads0.some((p) => p.id === d.id)),
+      ...ads0,
+    ];
     setPosts(posts);
     saveJson("posts", posts);
     setCampaigns(
@@ -78,6 +93,18 @@ export function useQonvo() {
     if (!joins0.length) saveJson("joins", joins);
     setPins(loadJson("pins", []));
     setTeams(loadJson("teams", []));
+    const tracks0 = loadJson<MusicTrack[]>("tracks", []);
+    const tracks = [
+      ...DEMO_TRACKS.filter((d) => !tracks0.some((t) => t.id === d.id)),
+      ...tracks0.map((t) => {
+        const demo = DEMO_TRACKS.find((d) => d.id === t.id);
+        return demo ?? t;
+      }),
+    ].filter((t) => !!parseMusicUrl(t.url));
+    setTracks(tracks);
+    saveJson("tracks", tracks);
+    const me = loadJson("me", "");
+    setAuthed(!!me && loadJson("authed", "") === me);
     setReady(true);
   }, []);
 
@@ -108,6 +135,65 @@ export function useQonvo() {
     recordJoin(name, roomId);
     return name;
   }, [handle, recordJoin, roomId]);
+
+  const register = useCallback((name: string, pass: string, agreed?: boolean) => {
+    const n = name.trim().slice(0, 24);
+    const p = pass.trim();
+    if (!agreed) {
+      setAuthErr("Accept the Terms to register.");
+      return false;
+    }
+    if (n.length < 3 || p.length < 4) {
+      setAuthErr("Username 3+ chars, password 4+.");
+      return false;
+    }
+    const users = loadJson<Record<string, string>>("users", {});
+    const key = n.toLowerCase();
+    if (users[key]) {
+      setAuthErr("That username is taken. Sign in.");
+      return false;
+    }
+    users[key] = passKey(n, p);
+    saveJson("users", users);
+    setHandle(n);
+    saveJson("me", n);
+    saveJson("authed", n);
+    saveJson("terms", "1");
+    setAuthed(true);
+    setAuthErr("");
+    recordJoin(n, roomId);
+    note(`Registered ${n}`);
+    return true;
+  }, [note, recordJoin, roomId]);
+
+  const login = useCallback((name: string, pass: string) => {
+    const n = name.trim();
+    const users = loadJson<Record<string, string>>("users", {});
+    const key = n.toLowerCase();
+    if (!users[key] || users[key] !== passKey(n, pass.trim())) {
+      setAuthErr("Wrong username or password.");
+      return false;
+    }
+    setHandle(n);
+    saveJson("me", n);
+    saveJson("authed", n);
+    setAuthed(true);
+    setAuthErr("");
+    recordJoin(n, roomId);
+    note(`Signed in ${n}`);
+    return true;
+  }, [note, recordJoin, roomId]);
+
+  const logout = useCallback(() => {
+    saveJson("authed", "");
+    setAuthed(false);
+  }, []);
+
+  const needAccount = useCallback(() => {
+    if (authed && handle) return true;
+    note("Register or sign in to do that.");
+    return false;
+  }, [authed, handle, note]);
 
   const rename = useCallback((name: string) => {
     const next = name.trim().slice(0, 24);
@@ -149,6 +235,12 @@ export function useQonvo() {
     [roomId],
   );
 
+  const purgeChat = useCallback(() => {
+    setMsgs([]);
+    saveJson(`msgs.${roomId}`, []);
+    note(`Chat purged in ${ROOMS.find((r) => r.id === roomId)?.name ?? roomId}`);
+  }, [note, roomId]);
+
   const pinRoom = useCallback(() => {
     const next = [roomId, ...pins.filter((p) => p !== roomId)].slice(0, 30);
     setPins(next);
@@ -177,6 +269,7 @@ export function useQonvo() {
       const t = draft.title.trim();
       const b = draft.body.trim();
       if (!t || !b) return;
+      if (!needAccount()) return;
       const who = ensureHandle();
       const item: Post = {
         id: uid(),
@@ -203,13 +296,14 @@ export function useQonvo() {
         note(`Draft saved: “${t}”`);
       }
     },
-    [ensureHandle, note, posts],
+    [ensureHandle, needAccount, note, posts],
   );
 
   const commentPost = useCallback(
     (postId: string, body: string) => {
       const text = body.trim();
       if (!text) return;
+      if (!needAccount()) return;
       const who = ensureHandle();
       const next = posts.map((p) =>
         p.id === postId ? { ...p, comments: [...p.comments, { author: who, body: text, ts: Date.now() }] } : p,
@@ -217,24 +311,26 @@ export function useQonvo() {
       setPosts(next);
       saveJson("posts", next);
     },
-    [ensureHandle, posts],
+    [ensureHandle, needAccount, posts],
   );
 
   const createTeam = useCallback(
     (name: string) => {
       const n = name.trim();
       if (!n) return;
+      if (!needAccount()) return;
       const who = ensureHandle();
       const next = [{ id: uid(), name: n, members: [who] }, ...teams];
       setTeams(next);
       saveJson("teams", next);
       note(`Created team ${n}`);
     },
-    [ensureHandle, note, teams],
+    [ensureHandle, needAccount, note, teams],
   );
 
   const joinTeam = useCallback(
     (id: string) => {
+      if (!needAccount()) return;
       const who = ensureHandle();
       const next = teams.map((t) =>
         t.id === id && !t.members.includes(who) ? { ...t, members: [...t.members, who] } : t,
@@ -242,13 +338,14 @@ export function useQonvo() {
       setTeams(next);
       saveJson("teams", next);
     },
-    [ensureHandle, teams],
+    [ensureHandle, needAccount, teams],
   );
 
   const saveAd = useCallback(
     (name: string, text: string, extra?: Partial<Campaign>) => {
       const n = name.trim();
       if (!n) return;
+      if (!needAccount()) return;
       const next: Campaign[] = [
         {
           id: uid(),
@@ -266,7 +363,7 @@ export function useQonvo() {
       saveJson("ads", next);
       note(`Ad submitted: ${n}`);
     },
-    [campaigns, note],
+    [campaigns, needAccount, note],
   );
 
   const patchAd = useCallback(
@@ -276,6 +373,45 @@ export function useQonvo() {
       saveJson("ads", next);
     },
     [campaigns],
+  );
+
+  const publishTrack = useCallback(
+    (draft: {
+      title: string;
+      artist: string;
+      url: string;
+      cover?: string;
+      genre?: string;
+      album?: string;
+      note?: string;
+      tags?: string;
+    }) => {
+      const parsed = parseMusicUrl(draft.url);
+      if (!parsed) return;
+      if (!needAccount()) return;
+      const who = ensureHandle();
+      const item: MusicTrack = {
+        id: uid(),
+        title: draft.title.trim() || "Untitled",
+        artist: draft.artist.trim() || who,
+        url: parsed.url,
+        platform: parsed.platform,
+        embed: parsed.embed,
+        cover: draft.cover,
+        genre: draft.genre,
+        album: draft.album,
+        note: draft.note,
+        tags: draft.tags,
+        author: who,
+        ts: Date.now(),
+      };
+      const next = [item, ...tracks];
+      setTracks(next);
+      saveJson("tracks", next);
+      setOpenTrack(item.id);
+      note(`Music listed: “${item.title}”`);
+    },
+    [ensureHandle, needAccount, note, tracks],
   );
 
   const reset = useCallback(() => {
@@ -289,7 +425,9 @@ export function useQonvo() {
     setTeams([]);
     setCampaigns([]);
     setJoins([]);
+    setTracks([]);
     setOpenPost(null);
+    setOpenTrack(null);
   }, []);
 
   const scores = allRoomMessages().reduce<Record<string, number>>((acc, m) => {
@@ -316,23 +454,33 @@ export function useQonvo() {
     teams,
     campaigns,
     joins,
+    tracks,
     openPost,
     setOpenPost,
+    openTrack,
+    setOpenTrack,
     scores,
     badges,
     openRoom,
     rename,
     send,
     react,
+    purgeChat,
     pinRoom,
     unpin,
     publishPost,
+    publishTrack,
     commentPost,
     createTeam,
     joinTeam,
     saveAd,
     patchAd,
     reset,
+    authed,
+    authErr,
+    register,
+    login,
+    logout,
     setJoinHandle: rename,
   };
 }

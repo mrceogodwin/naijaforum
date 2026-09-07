@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { COMMUNITIES, POST_CATS, REGIONS, ROOMS, roomName, safeHttpUrl, slugify, type MenuId, type Post } from "@/lib/qonvo-data";
+import { COMMUNITIES, POST_CATS, REGIONS, ROOMS, TERMS, parseMusicUrl, roomName, safeHttpUrl, slugify, type MenuId, type Post } from "@/lib/qonvo-data";
 import type { useQonvo } from "@/lib/use-qonvo";
 
 type Store = ReturnType<typeof useQonvo>;
@@ -33,7 +33,7 @@ export function QonvoScreen({
   else if (id === "trending") view = <Trending onHome={onHome} />;
   else if (id === "contact") view = <Contact store={store} />;
   else if (id === "admin") view = <Admin store={store} />;
-  return <div className="h-full overflow-y-auto pb-16 md:pb-4">{view}</div>;
+  return <div className="h-full overflow-y-auto pb-20 md:pb-4">{view}</div>;
 }
 
 function Card({ title, body, children }: { title: string; body?: string; children?: React.ReactNode }) {
@@ -112,6 +112,7 @@ function PostDetail({ post, store }: { post: Post; store: Store }) {
 }
 
 function Create({ store, onForum }: { store: Store; onForum?: () => void }) {
+  const [kind, setKind] = useState<"post" | "music">("post");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [excerpt, setExcerpt] = useState("");
@@ -120,6 +121,17 @@ function Create({ store, onForum }: { store: Store; onForum?: () => void }) {
   const [link, setLink] = useState("");
   const [image, setImage] = useState("");
   const [err, setErr] = useState("");
+  const [agree, setAgree] = useState(false);
+  const [artist, setArtist] = useState("");
+  const [album, setAlbum] = useState("");
+  const [genre, setGenre] = useState("Afrobeats");
+  const [preview, setPreview] = useState("");
+
+  function onUrl(v: string) {
+    setLink(v);
+    const parsed = parseMusicUrl(v);
+    setPreview(parsed ? `${parsed.platform}${parsed.embed ? " · embed ready" : " · link only"}` : "");
+  }
 
   async function onFile(file: File | undefined) {
     setErr("");
@@ -138,6 +150,10 @@ function Create({ store, onForum }: { store: Store; onForum?: () => void }) {
 
   function submit(status: "draft" | "publish") {
     setErr("");
+    if (!agree) {
+      setErr("Accept the Terms to publish.");
+      return;
+    }
     const url = safeHttpUrl(link);
     if (link.trim() && !url) {
       setErr("Link must be http or https.");
@@ -163,9 +179,78 @@ function Create({ store, onForum }: { store: Store; onForum?: () => void }) {
     if (status === "publish") onForum?.();
   }
 
+  function submitMusic() {
+    setErr("");
+    if (!agree) {
+      setErr("Accept the Terms to list music.");
+      return;
+    }
+    if (!parseMusicUrl(link)) {
+      setErr("Paste a Spotify, Apple Music, SoundCloud, Audiomack or Deezer track URL. YouTube video is for VIDEOS.");
+      return;
+    }
+    if (!title.trim() || !artist.trim()) {
+      setErr("Title and artist are required.");
+      return;
+    }
+    store.publishTrack({
+      title,
+      artist,
+      url: link,
+      cover: image,
+      genre,
+      album,
+      note: body,
+      tags,
+    });
+    setTitle("");
+    setArtist("");
+    setAlbum("");
+    setBody("");
+    setTags("");
+    setLink("");
+    setImage("");
+    setPreview("");
+    onForum?.();
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
-      <h2 className="text-xl font-bold">Create post</h2>
+      <h2 className="text-xl font-bold">Create</h2>
+      <div className="flex gap-2">
+        <button type="button" className={`rounded-md px-3 py-1.5 text-[11px] font-bold uppercase ${kind === "post" ? "btn-3d" : "border border-line text-muted"}`} onClick={() => setKind("post")}>
+          Post
+        </button>
+        <button type="button" className={`rounded-md px-3 py-1.5 text-[11px] font-bold uppercase ${kind === "music" ? "btn-3d" : "border border-line text-muted"}`} onClick={() => setKind("music")}>
+          Music
+        </button>
+      </div>
+      {kind === "music" ? (
+        <>
+          <p className="text-sm text-muted">Audio platforms only: Spotify, Apple Music, SoundCloud, Audiomack, Deezer. YouTube clips belong in VIDEOS.</p>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Track title" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <input value={artist} onChange={(e) => setArtist(e.target.value)} placeholder="Artist name" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <input value={album} onChange={(e) => setAlbum(e.target.value)} placeholder="Album / EP (optional)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <input value={genre} onChange={(e) => setGenre(e.target.value)} placeholder="Genre" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <input value={link} onChange={(e) => onUrl(e.target.value)} placeholder="https://open.spotify.com/track/…" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          {preview ? <p className="text-xs text-lime-2">{preview}</p> : null}
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} placeholder="Notes / credits" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <div className="raised rounded-xl p-3">
+            <div className="mb-2 text-[10px] font-bold tracking-wide text-muted uppercase">Cover image only (optional)</div>
+            <input type="file" accept="image/*" onChange={(e) => void onFile(e.target.files?.[0])} className="text-xs" />
+          </div>
+          {err ? <p className="text-sm text-danger">{err}</p> : null}
+          <label className="flex items-start gap-2 text-[11px] text-muted">
+            <input type="checkbox" className="mt-0.5" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+            <span>I agree to the Terms. This URL is mine to share. Audio is not hosted here.</span>
+          </label>
+          <button type="button" className="btn-3d rounded-lg px-3 py-2 text-sm font-semibold" onClick={submitMusic}>
+            List on MUSIC
+          </button>
+        </>
+      ) : (
+        <>
       <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
       <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={7} placeholder="Post content" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
       <textarea value={excerpt} onChange={(e) => setExcerpt(e.target.value)} rows={2} placeholder="Excerpt / summary" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
@@ -190,6 +275,10 @@ function Create({ store, onForum }: { store: Store; onForum?: () => void }) {
       </div>
       <p className="text-[11px] text-muted">Slug: {title ? slugify(title) : "—"} · Author set on publish</p>
       {err ? <p className="text-sm text-danger">{err}</p> : null}
+      <label className="flex items-start gap-2 text-[11px] text-muted">
+        <input type="checkbox" className="mt-0.5" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+        <span>I agree to the Terms & Conditions and I am responsible for this post.</span>
+      </label>
       <div className="flex gap-2">
         <button type="button" className="btn-3d rounded-lg px-3 py-2 text-sm font-semibold" onClick={() => submit("publish")}>
           Publish to feeds
@@ -198,6 +287,8 @@ function Create({ store, onForum }: { store: Store; onForum?: () => void }) {
           Save draft
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }
@@ -402,6 +493,8 @@ function Ads({ store }: { store: Store }) {
   const [placement, setPlacement] = useState<"sidebar" | "hero" | "chat">("sidebar");
   const [txHash, setTxHash] = useState("");
   const [amount, setAmount] = useState("");
+  const [agree, setAgree] = useState(false);
+  const [err, setErr] = useState("");
   return (
     <div className="mx-auto max-w-2xl space-y-3 overflow-y-auto p-5">
       <h2 className="text-xl font-bold">Advertise</h2>
@@ -419,10 +512,19 @@ function Ads({ store }: { store: Store }) {
       </select>
       <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount (e.g. 50 USDT)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
       <input value={txHash} onChange={(e) => setTxHash(e.target.value)} placeholder="Crypto tx hash after payment" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      <label className="flex items-start gap-2 text-[11px] text-muted">
+        <input type="checkbox" className="mt-0.5" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+        <span>I agree to the Terms. This ad is lawful and I accept review or rejection.</span>
+      </label>
       <button
         type="button"
         className="rounded-lg border border-line bg-panel-3 px-3 py-2 text-sm"
         onClick={() => {
+          if (!agree) {
+            setErr("Accept the Terms to submit an ad.");
+            return;
+          }
           store.saveAd(name, note, { placement, txHash, amount, status: txHash.trim() ? "paid" : "pending" });
           setName("");
           setNote("");
@@ -547,10 +649,10 @@ function Settings({ store }: { store: Store }) {
 function Help() {
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
-      <h2 className="text-xl font-bold">Help & FAQ</h2>
+      <h2 className="text-xl font-bold">Help & Terms</h2>
       <Card title="Rooms" body="Home is live chat. Messages stay on this device until a server is connected." />
       <Card title="Forum" body="Create post publishes a thread. Open it to comment." />
-      <Card title="Rules" body="No doxxing, scams, or illegal content. Handles are public in the room." />
+      <div className="raised whitespace-pre-wrap rounded-xl p-3 text-xs text-muted">{TERMS}</div>
     </div>
   );
 }

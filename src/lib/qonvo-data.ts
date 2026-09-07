@@ -180,3 +180,90 @@ export function allRoomMessages(): ChatMsg[] {
 export function roomName(id: string) {
   return ROOMS.find((r) => r.id === id)?.name ?? id;
 }
+
+export function handleColor(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 33 + name.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360} 62% 64%)`;
+}
+
+export const TERMS = `NaijaForum Terms of Use
+
+By creating an account or using post, music, video, or advertising tools you agree:
+
+1. You are responsible for what you publish. Do not post illegal content, scams, hate, or anyone’s private data.
+2. Music and video links must be yours to share. Playback stays on YouTube, Spotify, and other platforms. We do not host audio or video files.
+3. Ads you submit may be refused. Payment hashes are a record only until a live payment check exists.
+4. Handles and public posts can be seen by others on this device network. Do not treat this preview as a bank or a lawyer.
+5. We may hide, reject, or remove content and accounts that break these rules.
+6. The service is provided as-is. Community chat is not professional advice.
+
+Last updated September 2026.`;
+
+export function timeLabel(ts: number) {
+  const diff = Date.now() - ts;
+  if (diff < 45_000) return "just now";
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h`;
+  return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+export type MusicTrack = {
+  id: string;
+  title: string;
+  artist: string;
+  url: string;
+  platform: string;
+  embed?: string;
+  cover?: string;
+  genre?: string;
+  album?: string;
+  note?: string;
+  tags?: string;
+  author: string;
+  ts: number;
+};
+
+const MUSIC_HOSTS = [
+  "open.spotify.com",
+  "spotify.com",
+  "soundcloud.com",
+  "audiomack.com",
+  "music.apple.com",
+  "boomplay.com",
+  "deezer.com",
+];
+
+export function parseMusicUrl(raw: string): { url: string; platform: string; embed?: string } | undefined {
+  const url = safeHttpUrl(raw);
+  if (!url) return undefined;
+  let host = "";
+  try {
+    host = new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return undefined;
+  }
+  if (host.includes("youtu")) return undefined;
+  if (!MUSIC_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) return undefined;
+
+  if (host.includes("spotify")) {
+    const path = new URL(url).pathname.replace(/^\/intl-[^/]+/, "");
+    return { url, platform: "Spotify", embed: `https://open.spotify.com/embed${path}` };
+  }
+  if (host.includes("soundcloud")) {
+    return { url, platform: "SoundCloud", embed: `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=%231f8a5b&auto_play=false` };
+  }
+  if (host.includes("audiomack")) {
+    const path = new URL(url).pathname;
+    return { url, platform: "Audiomack", embed: `https://audiomack.com/embed${path}` };
+  }
+  if (host.includes("apple")) {
+    return { url, platform: "Apple Music", embed: url.replace("music.apple.com", "embed.music.apple.com") };
+  }
+  if (host.includes("boomplay")) return { url, platform: "Boomplay" };
+  if (host.includes("deezer")) {
+    const id = url.match(/track\/(\d+)/)?.[1];
+    return { url, platform: "Deezer", embed: id ? `https://widget.deezer.com/widget/dark/track/${id}` : undefined };
+  }
+  return { url, platform: host };
+}
