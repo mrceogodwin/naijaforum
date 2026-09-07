@@ -1,0 +1,140 @@
+import type { Campaign, Join, Note, Post } from "@/lib/qonvo-data";
+
+function poster(bg: string, label: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="360"><rect fill="${bg}" width="800" height="360"/><text x="36" y="196" fill="#f3f3f0" font-size="34" font-family="Segoe UI,sans-serif">${label}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+export const DEMO_POSTS: Post[] = [
+  {
+    id: "demo-feed-1",
+    title: "Lagos night market still hits different",
+    body: "Balogun after 8pm is a whole city. Who is going this weekend?",
+    excerpt: "Night market energy in Lagos — who is outside?",
+    author: "Amaka#2201",
+    ts: Date.now() - 3600_000,
+    comments: [{ author: "Tunde#104", body: "Lekki side too.", ts: Date.now() - 1800_000 }],
+    category: "Naija",
+    tags: "lagos, night",
+    link: "https://en.wikipedia.org/wiki/Lagos",
+    image: poster("#1f3d2e", "Lagos after dark"),
+    slug: "lagos-night-market",
+    status: "publish",
+  },
+  {
+    id: "demo-feed-2",
+    title: "Best jollof is not even a debate",
+    body: "Party jollof with that smoky bottom. I said what I said.",
+    excerpt: "Party jollof vs restaurant jollof.",
+    author: "Kemi#0092",
+    ts: Date.now() - 7200_000,
+    comments: [],
+    category: "Culture",
+    tags: "food",
+    image: poster("#3b2a16", "Jollof talk"),
+    slug: "jollof-debate",
+    status: "publish",
+  },
+  {
+    id: "demo-feed-3",
+    title: "Remote jobs that actually pay in Naira + USD",
+    body: "Share roles that paid on time. No fairy tales.",
+    excerpt: "Real remote pay, not screenshots.",
+    author: "Chidi#4410",
+    ts: Date.now() - 10800_000,
+    comments: [{ author: "Zara#77", body: "Product design internships too.", ts: Date.now() - 9000_000 }],
+    category: "Business",
+    tags: "work, remote",
+    link: "https://www.who.int/",
+    image: poster("#1a2744", "Work board"),
+    slug: "remote-jobs-naija",
+    status: "publish",
+  },
+  {
+    id: "demo-feed-4",
+    title: "Super Eagles lineup talk",
+    body: "Drop your XI before the next qualifier. No recency bias.",
+    excerpt: "Your starting XI.",
+    author: "Baba#12",
+    ts: Date.now() - 14400_000,
+    comments: [],
+    category: "Sports",
+    tags: "football",
+    image: poster("#14351f", "Match day"),
+    slug: "eagles-lineup",
+    status: "publish",
+  },
+  {
+    id: "demo-feed-5",
+    title: "New phones in Computer Village",
+    body: "Prices moved again. If you bought this week, drop the figure.",
+    excerpt: "Street prices, not flyer prices.",
+    author: "Ife#830",
+    ts: Date.now() - 18000_000,
+    comments: [],
+    category: "Tech",
+    tags: "phones",
+    image: poster("#2a2438", "Gadget run"),
+    slug: "computer-village",
+    status: "publish",
+  },
+];
+
+export const DEMO_ADS: Campaign[] = [
+  {
+    id: "demo-ad-hero",
+    name: "Paystack for hustle",
+    note: "Collect payments. Hero strip.",
+    ts: Date.now() - 4000_000,
+    status: "approved",
+    placement: "hero",
+    amount: "80 USDT",
+    txHash: "0xdemohero001",
+  },
+  {
+    id: "demo-ad-side",
+    name: "Glo data bundle",
+    note: "Sidebar unit live.",
+    ts: Date.now() - 3000_000,
+    status: "approved",
+    placement: "sidebar",
+    amount: "40 USDT",
+    txHash: "0xdemoside001",
+  },
+  {
+    id: "demo-ad-chat",
+    name: "Spotify Naija mix",
+    note: "Sits above chat.",
+    ts: Date.now() - 2000_000,
+    status: "approved",
+    placement: "chat",
+    amount: "55 USDT",
+    txHash: "0xdemochat001",
+  },
+  {
+    id: "demo-ad-wait",
+    name: "Pending crypto review",
+    note: "Waiting on hash check.",
+    ts: Date.now() - 600_000,
+    status: "paid",
+    placement: "hero",
+    amount: "50 USDT",
+    txHash: "0xpending99",
+  },
+];
+
+export const DEMO_JOINS: Join[] = [
+  { name: "Amaka#2201", ts: Date.now() - 120_000, room: "ng" },
+  { name: "Kemi#0092", ts: Date.now() - 300_000, room: "global" },
+  { name: "Chidi#4410", ts: Date.now() - 480_000, room: "tech" },
+  { name: "Baba#12", ts: Date.now() - 700_000, room: "sport" },
+  { name: "Ife#830", ts: Date.now() - 900_000, room: "ng" },
+];
+
+export const DEMO_NOTES: Note[] = [
+  { id: "dn1", text: "New feed posted: “Lagos night market still hits different”", ts: Date.now() - 3600_000 },
+  { id: "dn2", text: "Ad approved: Glo data bundle", ts: Date.now() - 3000_000 },
+  { id: "dn3", text: "Ad approved: Spotify Naija mix", ts: Date.now() - 2000_000 },
+  { id: "dn4", text: "New feed posted: “Best jollof is not even a debate”", ts: Date.now() - 7200_000 },
+  { id: "dn5", text: "Amaka#2201 joined Nigeria", ts: Date.now() - 120_000 },
+];
