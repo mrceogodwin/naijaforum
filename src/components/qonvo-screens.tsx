@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { COMMUNITIES, POST_CATS, REGIONS, ROOMS, TERMS, parseMusicUrl, roomName, safeHttpUrl, slugify, type MenuId, type Post } from "@/lib/qonvo-data";
 import type { useQonvo } from "@/lib/use-qonvo";
+import { claimOps, listStaff, setStaffRole, staffMe } from "@/lib/staff-server";
+import { authClient } from "@/lib/auth/client";
 
 type Store = ReturnType<typeof useQonvo>;
 
@@ -542,64 +544,73 @@ function Ads({ store }: { store: Store }) {
 }
 
 function Admin({ store }: { store: Store }) {
-  const [authed, setAuthed] = useState(() => {
-    try {
-      return sessionStorage.getItem("qonvo.admin") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const [pass, setPass] = useState("");
-  const [err, setErr] = useState("");
+  const [role, setRole] = useState<string | null>(null);
+  const [empty, setEmpty] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [staff, setStaff] = useState<{ user_id: string; role: string; handle: string | null }[]>([]);
+  const [grantId, setGrantId] = useState("");
+  const [grantRole, setGrantRole] = useState<"mod" | "admin" | "super">("mod");
+  const [msg, setMsg] = useState("");
 
-  if (!authed) {
+  useEffect(() => {
+    void staffMe()
+      .then((s) => {
+        setRole(s.role);
+        setEmpty(s.empty);
+        setUserId(s.userId);
+      })
+      .catch(() => setRole(null));
+  }, []);
+
+  useEffect(() => {
+    if (!role) return;
+    void listStaff()
+      .then((rows) => setStaff(rows))
+      .catch(() => setStaff([]));
+  }, [role]);
+
+  if (!role && !empty) {
     return (
       <div className="mx-auto max-w-sm space-y-3 p-5">
-        <h2 className="text-xl font-bold">Admin console</h2>
-        <p className="text-sm text-muted">Operator login. Preview code: naija-admin</p>
-        <input
-          type="password"
-          value={pass}
-          onChange={(e) => setPass(e.target.value)}
-          placeholder="Admin code"
-          className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm"
-        />
-        {err ? <p className="text-sm text-danger">{err}</p> : null}
+        <h2 className="text-xl font-bold">Staff console</h2>
+        <p className="text-sm text-muted">This account is not staff. Sign in on /login with a staff account.</p>
+      </div>
+    );
+  }
+
+  if (empty) {
+    return (
+      <div className="mx-auto max-w-sm space-y-3 p-5">
+        <h2 className="text-xl font-bold">Claim ops</h2>
+        <p className="text-sm text-muted">No staff yet. The first signed-in owner becomes super admin. Do this once.</p>
         <button
           type="button"
-          className="w-full rounded-lg border border-line bg-panel-3 py-2 text-sm font-semibold"
+          className="btn-3d w-full rounded-lg py-2 text-sm font-semibold"
           onClick={() => {
-            if (pass === "naija-admin" || pass === "qonvo-admin") {
-              sessionStorage.setItem("qonvo.admin", "1");
-              setAuthed(true);
-            } else setErr("Wrong code");
+            void claimOps().then((r) => {
+              if (r.ok) setRole("super");
+              else setMsg(r.reason);
+            });
           }}
         >
-          Sign in
+          Claim super admin
         </button>
+        {msg ? <p className="text-sm text-danger">{msg}</p> : null}
       </div>
     );
   }
 
   return (
     <div className="mx-auto grid max-w-5xl gap-3 overflow-y-auto p-4 md:grid-cols-2">
-      <div className="md:col-span-2 flex items-center justify-between">
+      <div className="md:col-span-2">
         <h2 className="text-xl font-bold">Super admin</h2>
-        <button
-          type="button"
-          className="text-xs text-muted"
-          onClick={() => {
-            sessionStorage.removeItem("qonvo.admin");
-            setAuthed(false);
-          }}
-        >
-          Sign out
-        </button>
+        <p className="text-xs text-muted">
+          Role {role} · id {userId}
+        </p>
       </div>
       <Card title="Queue" body={`${store.campaigns.filter((c) => c.status === "pending" || c.status === "paid").length} waiting`} />
       <Card title="Live ads" body={`${store.campaigns.filter((c) => c.status === "approved").length} approved`} />
       <div className="md:col-span-2 space-y-2">
-        {store.campaigns.length === 0 ? <p className="text-sm text-muted">No submissions yet. Users send them from Advertise.</p> : null}
         {store.campaigns.map((c) => (
           <div key={c.id} className="rounded-xl border border-line bg-panel p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -627,21 +638,76 @@ function Admin({ store }: { store: Store }) {
           </div>
         ))}
       </div>
+      {role === "super" || role === "admin" ? (
+        <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
+          <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Grant role</div>
+          <input value={grantId} onChange={(e) => setGrantId(e.target.value)} placeholder="User id from their session" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <select value={grantRole} onChange={(e) => setGrantRole(e.target.value as typeof grantRole)} className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm">
+            <option value="mod">mod</option>
+            <option value="admin">admin</option>
+            <option value="super">super</option>
+          </select>
+          <button
+            type="button"
+            className="btn-3d rounded-lg px-3 py-2 text-sm"
+            onClick={() => {
+              if (!grantId.trim()) return;
+              void setStaffRole({ data: { userId: grantId.trim(), role: grantRole } }).then(() => listStaff().then(setStaff));
+            }}
+          >
+            Save role
+          </button>
+          {staff.map((s) => (
+            <div key={s.user_id} className="text-xs text-muted">
+              {s.handle || s.user_id} · {s.role}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function Settings({ store }: { store: Store }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  async function change() {
+    setErr("");
+    setMsg("");
+    if (next.trim().length < 8) {
+      setErr("New password needs 8+ characters.");
+      return;
+    }
+    const r = await authClient.changePassword({ currentPassword: current, newPassword: next });
+    if (r.error) setErr(r.error.message ?? "Could not change password.");
+    else {
+      setMsg("Password updated.");
+      setCurrent("");
+      setNext("");
+    }
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Settings</h2>
-      <Card title="Handle" body={store.handle || "Guest"} />
-      <Card title="Data" body="Posts, chat, teams and campaigns stay in this browser.">
-        <button type="button" className="mt-2 rounded-lg border border-danger/40 px-3 py-2 text-sm text-danger" onClick={store.reset}>
-          Clear this device
+      <Card title="Public username" body={store.handle || "Sign in to set one"} />
+      <Card title="Change password" body="You must know the current password. Forgot-password email is not on yet.">
+        <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="Current password" className="mt-2 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+        <input type="password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="New password" className="mt-2 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+        {err ? <p className="mt-2 text-sm text-danger">{err}</p> : null}
+        {msg ? <p className="mt-2 text-sm text-lime-2">{msg}</p> : null}
+        <button type="button" className="btn-3d mt-2 rounded-lg px-3 py-2 text-sm" onClick={() => void change()}>
+          Update password
         </button>
       </Card>
-      <Card title="Regions" body={REGIONS.filter((r) => r !== "All").join(", ")} />
+      <Card title="This device" body="Signed-in pins and teams save on the server. Clear only wipes extras cached here.">
+        <button type="button" className="mt-2 rounded-lg border border-danger/40 px-3 py-2 text-sm text-danger" onClick={store.reset}>
+          Clear local extras
+        </button>
+      </Card>
     </div>
   );
 }

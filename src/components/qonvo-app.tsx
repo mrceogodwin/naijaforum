@@ -29,6 +29,9 @@ import { DIGITAL_TRACKS, VIDEO_CATALOG, VIDEO_SECTIONS } from "@/lib/qonvo-seed"
 import { useQonvo } from "@/lib/use-qonvo";
 import { QonvoScreen } from "@/components/qonvo-screens";
 import { QonvoMark } from "@/components/qonvo-mark";
+import { Link } from "@tanstack/react-router";
+import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
+import { useCurrentUserState } from "@/lib/auth/use-current-user";
 
 const EMOJIS = ["😀", "😂", "😍", "🔥", "👍", "🙏", "💯", "🎉", "😢", "😮", "😎", "❤️", "🇳🇬", "👀", "🤔", "💭"];
 
@@ -66,6 +69,7 @@ function fmt(n: number) {
 
 export function QonvoApp() {
   const store = useQonvo();
+  const session = useCurrentUserState();
   const [query, setQuery] = useState("");
   const [region, setRegion] = useState("All");
   const [draft, setDraft] = useState("");
@@ -148,9 +152,20 @@ export function QonvoApp() {
                 <Menu className="size-3.5" /> Menu
               </span>
             </button>
-            <button type="button" className="btn-3d max-w-[28vw] truncate rounded-md px-2 py-1 text-xs font-semibold" onClick={() => setJoinOpen(true)}>
-              {store.authed ? store.handle : "Sign in"}
-            </button>
+            {session.isPending ? (
+              <span className="h-7 w-16 animate-pulse rounded-md bg-white/10" />
+            ) : (
+              <>
+                <SignedIn>
+                  <UserButton />
+                </SignedIn>
+                <SignedOut>
+                  <Link to="/login" className="btn-3d rounded-md px-2 py-1 text-xs font-semibold">
+                    Sign in
+                  </Link>
+                </SignedOut>
+              </>
+            )}
           </div>
         </div>
         <div className="inset-well h-7 overflow-hidden border-x-0">
@@ -219,12 +234,12 @@ export function QonvoApp() {
             <HomeTab label="Music" on={homeTab === "music"} onClick={() => setHomeTab("music")} />
             <HomeTab label="Videos" on={homeTab === "videos"} onClick={() => setHomeTab("videos")} />
             {homeTab === "feeds" ? (
-              <button type="button" className="btn-3d ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold" onClick={() => (store.authed ? setScreen("create") : setJoinOpen(true))}>
+              <button type="button" className="btn-3d ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
                 New
               </button>
             ) : null}
             {homeTab === "music" ? (
-              <button type="button" className="btn-3d ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold" onClick={() => (store.authed ? setScreen("create") : setJoinOpen(true))}>
+              <button type="button" className="btn-3d ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
                 Add
               </button>
             ) : null}
@@ -239,7 +254,7 @@ export function QonvoApp() {
               {homeTab === "feeds" ? (
                 <FeedPane store={store} />
               ) : homeTab === "music" ? (
-                <MusicPane store={store} onAdd={() => (store.authed ? setScreen("create") : setJoinOpen(true))} />
+                <MusicPane store={store} onAdd={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))} />
               ) : homeTab === "videos" ? (
                 <VideoPane />
               ) : homeTab === "advert" ? (
