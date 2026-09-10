@@ -2,10 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Award,
   Bookmark,
+  Copy,
+  Eye,
   Hash,
+  Heart,
   HelpCircle,
   Home,
   LayoutDashboard,
+  Link2,
   Mail,
   Megaphone,
   Menu,
@@ -15,6 +19,7 @@ import {
   Play,
   Search,
   Send,
+  Share2,
   Smile,
   Settings,
   Trophy,
@@ -24,7 +29,7 @@ import {
   Shield,
   X,
 } from "lucide-react";
-import { MENU, POST_CATS, REGIONS, ROOMS, handleColor, parseMusicUrl, roomName, timeLabel, type Campaign, type MenuId, type Room } from "@/lib/qonvo-data";
+import { MENU, POST_CATS, REGIONS, ROOMS, fmtCount, handleColor, parseMusicUrl, roomName, timeLabel, youtubeId, type Campaign, type MenuId, type Room } from "@/lib/qonvo-data";
 import { DIGITAL_TRACKS, VIDEO_CATALOG, VIDEO_SECTIONS } from "@/lib/qonvo-seed";
 import { useQonvo } from "@/lib/use-qonvo";
 import { QonvoScreen } from "@/components/qonvo-screens";
@@ -32,6 +37,8 @@ import { QonvoMark } from "@/components/qonvo-mark";
 import { Link } from "@tanstack/react-router";
 import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { accountEmail, publicUsername } from "@/lib/account-email";
+import { authClient } from "@/lib/auth/client";
 
 const EMOJIS = ["😀", "😂", "😍", "🔥", "👍", "🙏", "💯", "🎉", "😢", "😮", "😎", "❤️", "🇳🇬", "👀", "🤔", "💭"];
 
@@ -82,6 +89,7 @@ export function QonvoApp() {
   const [homeTab, setHomeTab] = useState<"chat" | "feeds" | "advert" | "music" | "videos">("feeds");
   const [joinPass, setJoinPass] = useState("");
   const [joinAgree, setJoinAgree] = useState(false);
+  const [joinErr, setJoinErr] = useState("");
   const [purge, setPurge] = useState("18:00:00");
   const scroller = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -122,6 +130,7 @@ export function QonvoApp() {
 
   function goHome(roomId?: string) {
     if (roomId) store.openRoom(roomId);
+    else setHomeTab("feeds");
     setScreen("home");
     setMenuOpen(false);
     setRoomsOpen(false);
@@ -258,7 +267,11 @@ export function QonvoApp() {
               ) : homeTab === "videos" ? (
                 <VideoPane />
               ) : homeTab === "advert" ? (
-                <AdvertPane ads={store.campaigns} onCreate={() => setScreen("ads")} />
+                <AdvertPane
+                  ads={store.campaigns}
+                  onCreate={() => (store.authed || session.user ? setScreen("ads") : setJoinOpen(true))}
+                  onView={(id) => store.see("ads", id)}
+                />
               ) : (
                 <>
               <div className="flex items-center justify-between border-b border-white/5 bg-panel px-3 py-2">
@@ -486,7 +499,7 @@ export function QonvoApp() {
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-line bg-panel p-4">
             <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-lg font-bold">Register / sign in</h2>
+              <h2 className="text-lg font-bold">Username + password</h2>
               <button type="button" onClick={() => setJoinOpen(false)} aria-label="Close">
                 <X className="size-4" />
               </button>
@@ -504,6 +517,7 @@ export function QonvoApp() {
               placeholder="Password"
               className="mb-3 w-full rounded-lg border border-line bg-black/40 px-3 py-2 text-sm outline-none"
             />
+            {joinErr ? <p className="mb-2 text-sm text-danger">{joinErr}</p> : null}
             {store.authErr ? <p className="mb-2 text-sm text-danger">{store.authErr}</p> : null}
             <label className="mb-2 flex items-start gap-2 text-[11px] text-muted">
               <input type="checkbox" className="mt-0.5" checked={joinAgree} onChange={(e) => setJoinAgree(e.target.checked)} />
@@ -515,13 +529,31 @@ export function QonvoApp() {
                 and that I am responsible for posts, music URLs, and ads I submit.
               </span>
             </label>
-            <p className="mb-2 text-[11px] text-muted">Needed to post, list music, or place ads. Browse stays open.</p>
+            <p className="mb-2 text-[11px] text-muted">No email. Needed to post, list music, or place ads. Browse stays open.</p>
             <div className="flex gap-2">
               <button
                 type="button"
                 className="flex-1 rounded-lg border border-line bg-panel-3 py-2 text-sm font-bold"
                 onClick={() => {
-                  if (store.register(joinName, joinPass, joinAgree)) setJoinOpen(false);
+                  void (async () => {
+                    setJoinErr("");
+                    const handle = publicUsername(joinName);
+                    if (handle.length < 3) {
+                      setJoinErr("Username needs 3+ characters.");
+                      return;
+                    }
+                    if (joinPass.length < 8) {
+                      setJoinErr("Password needs 8+ characters.");
+                      return;
+                    }
+                    if (!joinAgree) {
+                      setJoinErr("Accept the Terms to register.");
+                      return;
+                    }
+                    const r = await authClient.signUp.email({ email: accountEmail(handle), password: joinPass, name: handle });
+                    if (r.error) setJoinErr(r.error.message ?? "Sign up failed");
+                    else window.location.reload();
+                  })();
                 }}
               >
                 Register
@@ -530,7 +562,13 @@ export function QonvoApp() {
                 type="button"
                 className="flex-1 rounded-lg border border-line py-2 text-sm"
                 onClick={() => {
-                  if (store.login(joinName, joinPass)) setJoinOpen(false);
+                  void (async () => {
+                    setJoinErr("");
+                    const handle = publicUsername(joinName);
+                    const r = await authClient.signIn.email({ email: accountEmail(handle), password: joinPass });
+                    if (r.error) setJoinErr(r.error.message ?? "Sign in failed");
+                    else window.location.reload();
+                  })();
                 }}
               >
                 Sign in
@@ -626,14 +664,17 @@ function MusicPane({ store, onAdd }: { store: ReturnType<typeof useQonvo>; onAdd
     const on = play === t.id;
     return (
       <div className="raised overflow-hidden rounded-lg">
-        <button type="button" className="flex w-full items-center gap-2 px-2 py-1.5 text-left" onClick={() => setPlay(on ? null : t.id)}>
+        <button type="button" className="flex w-full items-center gap-2 px-2 py-1.5 text-left" onClick={() => {
+          setPlay(on ? null : t.id);
+          if (!on) store.see("tracks", t.id);
+        }}>
           <span className="btn-3d grid size-7 shrink-0 place-items-center rounded-full">
             <Play className="size-3 fill-lime-2 text-lime-2" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="truncate text-xs font-semibold">{t.title}</div>
             <div className="truncate text-[10px] text-muted">
-              {t.artist} · {t.platform}
+              {t.artist} · {t.platform} · {fmtCount(t.views ?? 0)} views
             </div>
           </div>
         </button>
@@ -687,6 +728,8 @@ function VideoPane() {
   const [sec, setSec] = useState<(typeof VIDEO_SECTIONS)[number]>("Movies");
   const [play, setPlay] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [shown, setShown] = useState(12);
+  const [views, setViews] = useState<Record<string, number>>({});
   const list = useMemo(() => {
     const raw = [...(VIDEO_CATALOG[sec] ?? [])];
     for (let i = raw.length - 1; i > 0; i--) {
@@ -705,6 +748,7 @@ function VideoPane() {
             onClick={() => {
               setSec(s);
               setPlay(null);
+              setShown(12);
             }}
             className={`shrink-0 rounded-full px-2 py-1 text-[10px] ${sec === s ? "btn-3d font-semibold" : "text-muted"}`}
           >
@@ -717,6 +761,7 @@ function VideoPane() {
           onClick={() => {
             setPlay(null);
             setTick((n) => n + 1);
+            setShown(12);
           }}
         >
           Refresh
@@ -726,17 +771,31 @@ function VideoPane() {
         <iframe title="video" src={`https://www.youtube.com/embed/${play}?rel=0`} className="h-40 w-full shrink-0 border-0 bg-black" allow="encrypted-media; fullscreen" loading="lazy" />
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          {list.map((v) => (
-            <button key={v.id} type="button" className="raised overflow-hidden rounded-lg text-left" onClick={() => setPlay(v.id)}>
-              <img src={`https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`} alt="" className="h-20 w-full object-cover" />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
+          {list.slice(0, shown).map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              className="raised overflow-hidden rounded-lg text-left"
+              onClick={() => {
+                setPlay(v.id);
+                setViews((m) => ({ ...m, [v.id]: (m[v.id] ?? 0) + 1 }));
+              }}
+            >
+              <img src={`https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`} alt="" className="h-24 w-full object-cover" />
               <div className="flex items-center gap-1 p-1.5">
                 <Play className="size-3 shrink-0 text-lime-2" />
                 <span className="line-clamp-2 text-[10px] font-semibold">{v.title}</span>
               </div>
+              <div className="px-1.5 pb-1.5 text-[9px] text-muted">{fmtCount(views[v.id] ?? 0)} views</div>
             </button>
           ))}
         </div>
+        {shown < list.length ? (
+          <button type="button" className="btn-3d mx-auto mt-3 block rounded-md px-4 py-1.5 text-[11px] font-semibold" onClick={() => setShown((n) => n + 6)}>
+            Load more
+          </button>
+        ) : null}
         <p className="mt-2 px-1 text-[10px] text-muted">YouTube CDN only. This site does not host or stream video files.</p>
       </div>
     </div>
@@ -753,56 +812,173 @@ function HomeTab({ label, on, onClick }: { label: string; on: boolean; onClick: 
 
 function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; store: ReturnType<typeof useQonvo> }) {
   const [note, setNote] = useState("");
+  const [reason, setReason] = useState("");
+  const [replyTo, setReplyTo] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    store.see("posts", post.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.id]);
+  const roots = post.comments.filter((c) => !c.parentTs);
+  const kids = (ts: number) => post.comments.filter((c) => c.parentTs === ts);
+  const mins = Math.max(1, Math.round(post.body.split(/\s+/).length / 180));
+  const saved = store.savedPosts.includes(post.id);
+  const likes = store.likes[post.id] ?? 0;
+  const shares = store.shares[post.id] ?? 0;
+  const url = typeof window !== "undefined" ? `${window.location.origin}/?feed=${encodeURIComponent(post.id)}` : "";
+  const shareText = `${post.title} — NaijaForum`;
+  function share(kind: "wa" | "x" | "fb" | "tg" | "copy" | "native") {
+    store.sharePost(post.id);
+    const u = encodeURIComponent(url);
+    const t = encodeURIComponent(shareText);
+    if (kind === "wa") window.open(`https://wa.me/?text=${t}%20${u}`, "_blank", "noopener,noreferrer");
+    if (kind === "x") window.open(`https://twitter.com/intent/tweet?text=${t}&url=${u}`, "_blank", "noopener,noreferrer");
+    if (kind === "fb") window.open(`https://www.facebook.com/sharer/sharer.php?u=${u}`, "_blank", "noopener,noreferrer");
+    if (kind === "tg") window.open(`https://t.me/share/url?url=${u}&text=${t}`, "_blank", "noopener,noreferrer");
+    if (kind === "copy") {
+      void navigator.clipboard?.writeText(url).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      });
+    }
+    if (kind === "native" && navigator.share) void navigator.share({ title: post.title, text: shareText, url });
+  }
   return (
     <article className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-2xl px-4 py-4">
+      <div className="mx-auto max-w-3xl px-4 py-4">
         <button type="button" className="text-[11px] text-muted" onClick={() => store.setOpenPost(null)}>
           ← Feeds
         </button>
-        <div className="mt-3 text-[10px] font-bold tracking-[0.16em] text-lime-2 uppercase">{post.category || "General"}</div>
-        <h1 className="mt-1 text-2xl font-extrabold leading-tight">{post.title}</h1>
-        <div className="mt-2 flex items-center gap-2 text-[11px] text-muted">
-          <span className="font-semibold" style={{ color: handleColor(post.author) }}>
-            {post.author}
-          </span>
-          <span>· {timeLabel(post.ts)}</span>
-          {post.tags ? <span>· {post.tags}</span> : null}
+        <div className="raised mt-3 overflow-hidden rounded-2xl">
+          <div className="flex flex-col gap-4 p-4 sm:flex-row">
+            {post.image ? <img src={post.image} alt="" className="h-44 w-full shrink-0 rounded-xl object-cover sm:h-48 sm:w-60" /> : null}
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-bold tracking-[0.16em] text-lime-2 uppercase">{post.category || "General"}</div>
+              <h1 className="mt-1 text-2xl font-extrabold leading-tight">{post.title}</h1>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
+                <span className="font-semibold" style={{ color: handleColor(post.author) }}>
+                  {post.author}
+                </span>
+                <span>· {timeLabel(post.ts)}</span>
+                <span>· {mins} min read</span>
+                {post.tags ? <span>· {post.tags}</span> : null}
+              </div>
+              {post.excerpt ? <p className="mt-3 text-sm italic text-muted">{post.excerpt}</p> : null}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-px border-t border-white/5 bg-black/30 sm:grid-cols-6">
+            {[
+              { icon: Eye, n: post.views ?? 0, label: "Views" },
+              { icon: MessageSquare, n: post.comments.length, label: "Comments" },
+              { icon: Heart, n: likes, label: "Likes" },
+              { icon: Bookmark, n: saved ? 1 : 0, label: saved ? "Saved" : "Save" },
+              { icon: Share2, n: shares, label: "Shares" },
+              { icon: Hash, n: mins, label: "Min" },
+            ].map((s) => (
+              <div key={s.label} className="flex flex-col items-center gap-0.5 bg-panel py-2.5">
+                <s.icon className="size-3.5 text-lime-2" />
+                <span className="text-[11px] font-bold">{fmtCount(s.n)}</span>
+                <span className="text-[9px] tracking-wide text-muted uppercase">{s.label}</span>
+              </div>
+            ))}
+          </div>
         </div>
-        {post.image ? (
-          <img src={post.image} alt="" className="mt-4 h-16 w-24 rounded-md object-cover" />
-        ) : null}
-        {post.excerpt ? <p className="mt-4 text-sm italic text-muted">{post.excerpt}</p> : null}
-        <div className="mt-4 space-y-3 text-[15px] leading-7 text-fg/90">
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <button type="button" className="btn-3d inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold" onClick={() => store.likePost(post.id)}>
+            <Heart className="size-3 fill-lime-2 text-lime-2" /> Like
+          </button>
+          <button type="button" className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-[11px] font-semibold ${saved ? "btn-3d" : "border-line text-muted"}`} onClick={() => store.savePostMark(post.id)}>
+            <Bookmark className="size-3" /> {saved ? "Saved" : "Save"}
+          </button>
+          <button type="button" className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[11px]" onClick={() => share("wa")}>
+            WA
+          </button>
+          <button type="button" className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[11px]" onClick={() => share("x")}>
+            X
+          </button>
+          <button type="button" className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[11px]" onClick={() => share("fb")}>
+            Facebook
+          </button>
+          <button type="button" className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[11px]" onClick={() => share("tg")}>
+            Telegram
+          </button>
+          <button type="button" className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[11px]" onClick={() => share("copy")}>
+            <Copy className="size-3" /> {copied ? "Copied" : "Copy"}
+          </button>
+          <button type="button" className="inline-flex items-center gap-1 rounded-full border border-line px-3 py-1.5 text-[11px]" onClick={() => share("native")}>
+            <Share2 className="size-3 text-lime-2" /> Share
+          </button>
+        </div>
+        <div className="mt-5 space-y-3 text-[15px] leading-7 text-fg/90">
           {post.body.split(/\n+/).map((para, i) => (
             <p key={i}>{para}</p>
           ))}
         </div>
         {post.link ? (
-          <a href={post.link} target="_blank" rel="noopener noreferrer" className="mt-4 inline-block text-xs text-lime-2">
-            Source
+          <a href={post.link} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-1 text-xs text-lime-2">
+            <Link2 className="size-3" /> Source
           </a>
         ) : null}
         <div className="mt-8 border-t border-line pt-4">
-          <div className="text-[10px] font-bold tracking-wide text-muted uppercase">{post.comments.length} comments</div>
-          {post.comments.map((c) => (
-            <div key={c.ts} className="mt-3 border-b border-white/5 pb-3 text-sm">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] font-bold tracking-wide text-muted uppercase">{post.comments.length} comments</div>
+            <span className="text-[10px] text-muted">Reply to keep the convo going</span>
+          </div>
+          {roots.map((c) => (
+            <div key={c.ts} className="mt-3 rounded-xl border border-white/5 bg-panel-3/60 p-3 text-sm">
               <div className="text-[11px] font-semibold" style={{ color: handleColor(c.author) }}>
                 {c.author} <span className="font-normal text-muted">{timeLabel(c.ts)}</span>
               </div>
               <p className="mt-1 leading-6">{c.body}</p>
+              <button type="button" className="mt-1 text-[10px] text-lime-2" onClick={() => setReplyTo(c.ts)}>
+                Reply
+              </button>
+              {kids(c.ts).map((r) => (
+                <div key={r.ts} className="mt-2 ml-4 border-l border-lime-2/40 pl-3">
+                  <div className="text-[11px] font-semibold" style={{ color: handleColor(r.author) }}>
+                    {r.author} <span className="font-normal text-muted">{timeLabel(r.ts)}</span>
+                  </div>
+                  <p className="mt-1 leading-6">{r.body}</p>
+                </div>
+              ))}
             </div>
           ))}
           <form
             className="mt-3 flex gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              store.commentPost(post.id, note);
+              store.commentPost(post.id, note, replyTo ?? undefined);
               setNote("");
+              setReplyTo(null);
             }}
           >
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={store.authed ? "Write a comment" : "Sign in to comment"} className="min-h-10 flex-1 rounded-lg border border-line bg-panel px-3 text-sm" />
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={store.authed ? (replyTo ? "Reply to comment…" : "Write a comment") : "Sign in to comment"}
+              className="min-h-10 flex-1 rounded-lg border border-line bg-panel px-3 text-sm"
+            />
             <button type="submit" className="btn-3d rounded-lg px-3 text-xs font-semibold">
-              Reply
+              {replyTo ? "Reply" : "Comment"}
+            </button>
+          </form>
+          {replyTo ? (
+            <button type="button" className="mt-1 text-[10px] text-muted" onClick={() => setReplyTo(null)}>
+              Cancel reply
+            </button>
+          ) : null}
+          <form
+            className="mt-4 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!reason.trim()) return;
+              store.flagPost(post.id, reason);
+              setReason("");
+            }}
+          >
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Report this post" className="min-h-10 flex-1 rounded-lg border border-line bg-panel px-3 text-xs" />
+            <button type="submit" className="text-xs text-danger">
+              Report
             </button>
           </form>
         </div>
@@ -813,7 +989,7 @@ function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; s
 
 function FeedPane({ store }: { store: ReturnType<typeof useQonvo> }) {
   const [cat, setCat] = useState("All");
-  const [shown, setShown] = useState(5);
+  const [shown, setShown] = useState(12);
   const open = store.posts.find((p) => p.id === store.openPost);
   const live = store.posts.filter((p) => p.status !== "draft" && (cat === "All" || p.category === cat));
   if (open) {
@@ -828,7 +1004,7 @@ function FeedPane({ store }: { store: ReturnType<typeof useQonvo> }) {
             type="button"
             onClick={() => {
               setCat(c);
-              setShown(5);
+              setShown(12);
             }}
             className={`shrink-0 rounded-full px-2 py-1 text-[10px] ${cat === c ? "btn-3d font-semibold" : "text-muted"}`}
           >
@@ -837,24 +1013,24 @@ function FeedPane({ store }: { store: ReturnType<typeof useQonvo> }) {
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
           {live.slice(0, shown).map((p) => (
             <button key={p.id} type="button" className="raised overflow-hidden rounded-lg text-left" onClick={() => store.setOpenPost(p.id)}>
-              {p.image ? <img src={p.image} alt="" className="h-24 w-full object-cover" /> : <div className="h-24 bg-panel-3" />}
+              {p.image ? <img src={p.image} alt="" className="h-28 w-full object-cover" /> : <div className="h-28 bg-panel-3" />}
               <div className="p-2">
                 <div className="text-[9px] font-bold tracking-wide text-lime-2 uppercase">{p.category || "General"}</div>
                 <div className="mt-0.5 line-clamp-2 text-xs font-semibold leading-snug">{p.title}</div>
                 <p className="mt-1 line-clamp-2 text-[10px] text-muted">{p.excerpt || p.body}</p>
                 <div className="mt-1 truncate text-[9px]">
                   <span style={{ color: handleColor(p.author) }}>{p.author}</span>
-                  <span className="text-muted"> · {timeLabel(p.ts)}</span>
+                  <span className="text-muted"> · {timeLabel(p.ts)} · {fmtCount(p.views ?? 0)} views</span>
                 </div>
               </div>
             </button>
           ))}
         </div>
         {shown < live.length ? (
-          <button type="button" className="btn-3d mx-auto mt-3 block rounded-md px-4 py-1.5 text-[11px] font-semibold" onClick={() => setShown((n) => n + 5)}>
+          <button type="button" className="btn-3d mx-auto mt-3 block rounded-md px-4 py-1.5 text-[11px] font-semibold" onClick={() => setShown((n) => n + 6)}>
             Load more
           </button>
         ) : null}
@@ -863,40 +1039,74 @@ function FeedPane({ store }: { store: ReturnType<typeof useQonvo> }) {
   );
 }
 
-function AdvertPane({ ads, onCreate }: { ads: Campaign[]; onCreate: () => void }) {
+function AdvertPane({ ads, onCreate, onView }: { ads: Campaign[]; onCreate: () => void; onView: (id: string) => void }) {
+  const [shown, setShown] = useState(12);
   const live = ads.filter((a) => a.status === "approved");
+  const mine = ads.filter((a) => a.status !== "approved");
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b border-white/5 px-3 py-2">
-        <span className="text-xs text-muted">Placement board</span>
+        <span className="text-xs text-muted">Approved ads · 5 formats</span>
         <button type="button" className="btn-3d rounded-md px-3 py-1 text-[11px] font-semibold" onClick={onCreate}>
-          Submit ad
+          Place ad
         </button>
       </div>
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-        {["hero", "sidebar", "chat"].map((slot) => (
-          <div key={slot} className="raised rounded-xl p-3">
-            <div className="text-[10px] font-bold tracking-wide text-muted uppercase">{slot} placement</div>
-            {live.filter((a) => a.placement === slot).length === 0 ? (
-              <p className="mt-1 text-xs text-muted">Open slot</p>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
+          {live.slice(0, shown).map((a) => {
+            const yt = a.video ? youtubeId(a.video) || a.video : undefined;
+            const inner = (
+              <div className="raised overflow-hidden rounded-lg text-left">
+                {a.kind === "video" || a.kind === "video-text" ? (
+                  yt ? (
+                    <img src={`https://i.ytimg.com/vi/${yt}/hqdefault.jpg`} alt="" className="h-28 w-full object-cover" />
+                  ) : (
+                    <div className="grid h-28 place-items-center bg-panel-3 text-[10px] text-muted">Video</div>
+                  )
+                ) : a.image ? (
+                  <img src={a.image} alt="" className="h-28 w-full object-cover" />
+                ) : (
+                  <div className="grid h-28 place-items-center bg-panel-3 px-2 text-center text-[11px] font-semibold">{a.name}</div>
+                )}
+                <div className="p-2">
+                  <div className="text-[9px] font-bold tracking-wide text-lime-2 uppercase">{a.kind || "image-text"}</div>
+                  <div className="mt-0.5 line-clamp-2 text-xs font-semibold">{a.name}</div>
+                  {a.kind === "image-text" || a.kind === "video-text" || a.kind === "text" ? (
+                    <p className="mt-1 line-clamp-2 text-[10px] text-muted">{a.note}</p>
+                  ) : null}
+                  <div className="mt-1 text-[9px] text-muted">{fmtCount(a.views ?? 0)} views</div>
+                </div>
+              </div>
+            );
+            return a.link ? (
+              <a
+                key={a.id}
+                href={a.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => onView(a.id)}
+              >
+                {inner}
+              </a>
             ) : (
-              live
-                .filter((a) => a.placement === slot)
-                .map((a) => (
-                  <div key={a.id} className="mt-1 text-sm">
-                    {a.name}
-                  </div>
-                ))
-            )}
+              <button key={a.id} type="button" onClick={() => onView(a.id)}>
+                {inner}
+              </button>
+            );
+          })}
+        </div>
+        {live.length === 0 ? <p className="p-2 text-xs text-muted">No live ads yet. Place one after crypto payment.</p> : null}
+        {shown < live.length ? (
+          <button type="button" className="btn-3d mx-auto mt-3 block rounded-md px-4 py-1.5 text-[11px] font-semibold" onClick={() => setShown((n) => n + 6)}>
+            Load more
+          </button>
+        ) : null}
+        {mine.length ? <div className="mt-3 text-[10px] font-bold tracking-wide text-muted uppercase">Your queue</div> : null}
+        {mine.map((a) => (
+          <div key={a.id} className="mt-1 rounded-md border border-line px-2 py-1.5 text-[11px] text-muted">
+            {a.name} · {a.status} · {a.kind} · {(a.coin || "").toUpperCase()} {a.amount || ""}
           </div>
         ))}
-        {ads
-          .filter((a) => a.status !== "approved")
-          .map((a) => (
-            <div key={a.id} className="rounded-xl border border-line p-3 text-xs text-muted">
-              {a.name} · {a.status}
-            </div>
-          ))}
       </div>
     </div>
   );

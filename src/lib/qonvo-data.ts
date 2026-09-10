@@ -89,6 +89,8 @@ export type ChatMsg = {
   rx?: Record<string, number>;
 };
 
+export type PostComment = { author: string; body: string; ts: number; parentTs?: number };
+
 export type Post = {
   id: string;
   title: string;
@@ -96,13 +98,14 @@ export type Post = {
   excerpt?: string;
   author: string;
   ts: number;
-  comments: { author: string; body: string; ts: number }[];
+  comments: PostComment[];
   category?: string;
   tags?: string;
   link?: string;
   image?: string;
   slug?: string;
   status?: "draft" | "publish";
+  views?: number;
 };
 
 export const POST_CATS = ["General", "News", "Naija", "Tech", "Sports", "Business", "Culture", "Opinion"];
@@ -127,17 +130,68 @@ export function slugify(title: string) {
     .slice(0, 60);
 }
 
+export function youtubeId(raw: string) {
+  const v = raw.trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(v)) return v;
+  try {
+    const u = new URL(v);
+    if (u.hostname.includes("youtu.be")) return u.pathname.replace("/", "").slice(0, 11) || undefined;
+    const vq = u.searchParams.get("v");
+    if (vq) return vq;
+    const parts = u.pathname.split("/").filter(Boolean);
+    const i = parts.findIndex((p) => p === "embed" || p === "shorts");
+    if (i >= 0 && parts[i + 1]) return parts[i + 1].slice(0, 11);
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+export function fmtCount(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K`;
+  return String(n);
+}
+
 export type Team = { id: string; name: string; members: string[] };
+export type AdKind = "image" | "video" | "image-text" | "video-text" | "text";
+
+export const AD_KINDS: { id: AdKind; label: string }[] = [
+  { id: "image", label: "Image" },
+  { id: "video", label: "Video" },
+  { id: "image-text", label: "Image + text" },
+  { id: "video-text", label: "Video + text" },
+  { id: "text", label: "Text + link" },
+];
+
 export type Campaign = {
   id: string;
   name: string;
   note: string;
   ts: number;
   status: "pending" | "paid" | "approved" | "rejected";
-  placement: "sidebar" | "hero" | "chat";
+  placement: "sidebar" | "hero" | "chat" | "board";
   txHash?: string;
   amount?: string;
+  coin?: string;
+  link?: string;
+  image?: string;
+  video?: string;
+  kind?: AdKind;
+  views?: number;
 };
+
+export const AD_COINS = [
+  { id: "btc", label: "Bitcoin", ticker: "BTC" },
+  { id: "eth", label: "Ethereum", ticker: "ETH" },
+  { id: "usdc", label: "USDC", ticker: "USDC" },
+  { id: "usdt", label: "USDT", ticker: "USDT" },
+  { id: "sol", label: "Solana", ticker: "SOL" },
+  { id: "bnb", label: "BNB", ticker: "BNB" },
+  { id: "ltc", label: "Litecoin", ticker: "LTC" },
+  { id: "trx", label: "Tron TRC-20", ticker: "TRX" },
+] as const;
+
 export type Join = { name: string; ts: number; room?: string };
 export type Note = { id: string; text: string; ts: number };
 
@@ -222,6 +276,7 @@ export type MusicTrack = {
   tags?: string;
   author: string;
   ts: number;
+  views?: number;
 };
 
 const MUSIC_HOSTS = [

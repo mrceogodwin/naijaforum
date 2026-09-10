@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { COMMUNITIES, POST_CATS, REGIONS, ROOMS, TERMS, parseMusicUrl, roomName, safeHttpUrl, slugify, type MenuId, type Post } from "@/lib/qonvo-data";
+import { AD_COINS, AD_KINDS, COMMUNITIES, POST_CATS, REGIONS, ROOMS, TERMS, fmtCount, handleColor, parseMusicUrl, roomName, safeHttpUrl, slugify, timeLabel, youtubeId, type AdKind, type MenuId, type Post } from "@/lib/qonvo-data";
 import type { useQonvo } from "@/lib/use-qonvo";
-import { claimOps, listStaff, setStaffRole, staffMe } from "@/lib/staff-server";
+import { claimOps, listMail, listReports, listStaff, saveWallet, setStaffRole, staffMe } from "@/lib/staff-server";
+import { listWallets } from "@/lib/forum-server";
 import { authClient } from "@/lib/auth/client";
 
 type Store = ReturnType<typeof useQonvo>;
@@ -21,7 +22,7 @@ export function QonvoScreen({
   if (id === "forum") view = <Forum store={store} />;
   else if (id === "create") view = <Create store={store} onForum={onForum} />;
   else if (id === "community") view = <Communities onHome={onHome} />;
-  else if (id === "search") view = <Search onHome={onHome} />;
+  else if (id === "search") view = <Search store={store} onHome={onHome} />;
   else if (id === "profile") view = <Profile store={store} />;
   else if (id === "bookmarks") view = <Bookmarks store={store} onHome={onHome} />;
   else if (id === "notifications") view = <Notes store={store} />;
@@ -51,43 +52,49 @@ function Card({ title, body, children }: { title: string; body?: string; childre
 function Forum({ store }: { store: Store }) {
   const post = store.posts.find((p) => p.id === store.openPost);
   if (post) return <PostDetail post={post} store={store} />;
+  const live = store.posts.filter((p) => p.status !== "draft");
   return (
-    <div className="mx-auto max-w-2xl space-y-3 p-5">
+    <div className="mx-auto max-w-5xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Forum</h2>
-      {store.posts.length === 0 ? <p className="text-sm text-muted">No posts yet. Create one from Menu.</p> : null}
-      {store.posts.map((p) => (
-        <button
-          key={p.id}
-          type="button"
-          onClick={() => store.setOpenPost(p.id)}
-          className="block w-full rounded-xl border border-line bg-panel p-3 text-left"
-        >
-          <div className="font-semibold">{p.title}</div>
-          <div className="text-xs text-muted">
-            {p.author} · {p.comments.length} comments
-          </div>
-        </button>
-      ))}
+      {live.length === 0 ? <p className="text-sm text-muted">No posts yet. Create one from Menu.</p> : null}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
+        {live.map((p) => (
+          <button key={p.id} type="button" onClick={() => store.setOpenPost(p.id)} className="raised overflow-hidden rounded-lg text-left">
+            {p.image ? <img src={p.image} alt="" className="h-28 w-full object-cover" /> : <div className="h-28 bg-panel-3" />}
+            <div className="p-2">
+              <div className="text-[9px] font-bold tracking-wide text-lime-2 uppercase">{p.category || "General"}</div>
+              <div className="mt-0.5 line-clamp-2 text-xs font-semibold">{p.title}</div>
+              <p className="mt-1 line-clamp-2 text-[10px] text-muted">{p.excerpt || p.body}</p>
+              <div className="mt-1 text-[9px]">
+                <span style={{ color: handleColor(p.author) }}>{p.author}</span>
+                <span className="text-muted"> · {timeLabel(p.ts)} · {fmtCount(p.views ?? 0)} views</span>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
 function PostDetail({ post, store }: { post: Post; store: Store }) {
   const [body, setBody] = useState("");
+  const [reason, setReason] = useState("");
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <button type="button" className="text-xs text-muted" onClick={() => store.setOpenPost(null)}>
         Back to forum
       </button>
       <Card title={post.title} body={post.body} />
-      {post.image ? <img src={post.image} alt="" className="max-h-56 w-full rounded-xl object-cover" /> : null}
+      {post.image ? <img src={post.image} alt="" className="max-h-40 w-40 rounded-xl object-cover" /> : null}
       {post.link ? (
         <a href={post.link} target="_blank" rel="noopener noreferrer" className="text-xs text-lime-2">
           {post.link}
         </a>
       ) : null}
       <p className="text-xs text-muted">
-        {post.author} · {post.category} {post.tags ? `· ${post.tags}` : ""}
+        <span style={{ color: handleColor(post.author) }}>{post.author}</span> · {post.category} · {timeLabel(post.ts)}
+        {post.tags ? ` · ${post.tags}` : ""}
       </p>
       {post.comments.map((c) => (
         <Card key={c.ts} title={c.author} body={c.body} />
@@ -109,6 +116,21 @@ function PostDetail({ post, store }: { post: Post; store: Store }) {
       >
         Comment
       </button>
+      <div className="raised space-y-2 rounded-xl p-3">
+        <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Report</div>
+        <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this post should be reviewed" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+        <button
+          type="button"
+          className="text-xs text-danger"
+          onClick={() => {
+            if (!reason.trim()) return;
+            store.flagPost(post.id, reason);
+            setReason("");
+          }}
+        >
+          Send report
+        </button>
+      </div>
     </div>
   );
 }
@@ -345,27 +367,48 @@ function Communities({ onHome }: { onHome: (roomId?: string) => void }) {
   );
 }
 
-function Search({ onHome }: { onHome: (roomId?: string) => void }) {
+function Search({ store, onHome }: { store: Store; onHome: (roomId?: string) => void }) {
   const [q, setQ] = useState("");
-  const hits = useMemo(
+  const s = q.trim().toLowerCase();
+  const rooms = useMemo(
     () =>
       ROOMS.filter(
-        (r) =>
-          r.name.toLowerCase().includes(q.toLowerCase()) ||
-          r.region.toLowerCase().includes(q.toLowerCase()),
+        (r) => !s || r.name.toLowerCase().includes(s) || r.region.toLowerCase().includes(s),
       ),
-    [q],
+    [s],
   );
+  const posts = s ? store.posts.filter((p) => `${p.title} ${p.body} ${p.author} ${p.category}`.toLowerCase().includes(s)) : [];
+  const tracks = s ? store.tracks.filter((t) => `${t.title} ${t.artist}`.toLowerCase().includes(s)) : [];
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Search</h2>
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Rooms or regions"
+        placeholder="Rooms, posts, artists"
         className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm"
       />
-      {hits.map((r) => (
+      {s ? (
+        <>
+          <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Feeds</div>
+          {posts.length === 0 ? <p className="text-sm text-muted">No posts match.</p> : null}
+          {posts.map((p) => (
+            <button key={p.id} type="button" className="block w-full rounded-xl border border-line bg-panel p-3 text-left" onClick={() => store.setOpenPost(p.id)}>
+              <div className="font-semibold">{p.title}</div>
+              <div className="text-xs text-muted">{p.author} · {p.category}</div>
+            </button>
+          ))}
+          <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Music</div>
+          {tracks.length === 0 ? <p className="text-sm text-muted">No tracks match.</p> : null}
+          {tracks.map((t) => (
+            <div key={t.id} className="rounded-xl border border-line bg-panel p-3 text-sm">
+              {t.title} <span className="text-muted">· {t.artist}</span>
+            </div>
+          ))}
+        </>
+      ) : null}
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Rooms</div>
+      {rooms.map((r) => (
         <button
           key={r.id}
           type="button"
@@ -382,28 +425,52 @@ function Search({ onHome }: { onHome: (roomId?: string) => void }) {
 
 function Profile({ store }: { store: Store }) {
   const [name, setName] = useState(store.handle);
-  useEffect(() => setName(store.handle), [store.handle]);
+  const [bio, setBio] = useState(store.bio);
+  const [city, setCity] = useState(store.city);
+  useEffect(() => {
+    setName(store.handle);
+    setBio(store.bio);
+    setCity(store.city);
+  }, [store.bio, store.city, store.handle]);
+  const mine = store.posts.filter((p) => p.author === store.handle);
+  const songs = store.tracks.filter((t) => t.author === store.handle || t.artist === store.handle);
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Profile</h2>
-      <Card title={store.handle || "Guest"} body={`${store.posts.filter((p) => p.author === store.handle).length} posts · ${store.pins.length} bookmarks`} />
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="New handle"
-        className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm"
-      />
-      <button type="button" className="rounded-lg border border-line bg-panel-3 px-3 py-2 text-sm" onClick={() => store.rename(name)}>
-        Save handle
+      <Card title={store.handle || "Sign in"} body={`${mine.length} posts · ${store.pins.length} bookmarks · ${songs.length} tracks`} />
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Public username" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City (optional)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} placeholder="Bio" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <button type="button" className="btn-3d rounded-lg px-3 py-2 text-sm" onClick={() => store.rename(name, { bio, city })}>
+        Save profile
       </button>
+      {mine.map((p) => (
+        <button key={p.id} type="button" className="block w-full rounded-xl border border-line bg-panel p-3 text-left" onClick={() => store.setOpenPost(p.id)}>
+          <div className="font-semibold">{p.title}</div>
+          <div className="text-xs text-muted">{p.category}</div>
+        </button>
+      ))}
     </div>
   );
 }
 
 function Bookmarks({ store, onHome }: { store: Store; onHome: (id?: string) => void }) {
+  const saved = store.posts.filter((p) => store.savedPosts.includes(p.id));
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Bookmarks</h2>
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Saved posts</div>
+      {saved.length === 0 ? <p className="text-sm text-muted">Save a feed post from the article view.</p> : null}
+      {saved.map((p) => (
+        <button key={p.id} type="button" className="raised flex w-full gap-3 overflow-hidden rounded-xl text-left" onClick={() => { store.setOpenPost(p.id); onHome(); }}>
+          {p.image ? <img src={p.image} alt="" className="h-16 w-20 object-cover" /> : <div className="h-16 w-20 bg-panel-3" />}
+          <div className="min-w-0 py-2 pr-2">
+            <div className="truncate text-sm font-semibold">{p.title}</div>
+            <div className="text-[10px] text-muted">{p.author} · {fmtCount(p.views ?? 0)} views</div>
+          </div>
+        </button>
+      ))}
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Rooms</div>
       {store.pins.length === 0 ? <p className="text-sm text-muted">Bookmark a room from Home.</p> : null}
       {store.pins.map((id) => (
         <div key={id} className="flex items-center justify-between rounded-xl border border-line bg-panel p-3">
@@ -481,9 +548,9 @@ function Board({ store }: { store: Store }) {
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Leaderboard</h2>
-      {rows.length === 0 ? <p className="text-sm text-muted">Send messages to appear here.</p> : null}
+      {rows.length === 0 ? <p className="text-sm text-muted">Chat on the server to appear here.</p> : null}
       {rows.map(([name, n], i) => (
-        <Card key={name} title={`${i + 1}. ${name}`} body={`${n} messages on this device`} />
+        <Card key={name} title={`${i + 1}. ${name}`} body={`${n} messages`} />
       ))}
     </div>
   );
@@ -492,52 +559,107 @@ function Board({ store }: { store: Store }) {
 function Ads({ store }: { store: Store }) {
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
-  const [placement, setPlacement] = useState<"sidebar" | "hero" | "chat">("sidebar");
+  const [link, setLink] = useState("");
+  const [image, setImage] = useState("");
+  const [video, setVideo] = useState("");
+  const [kind, setKind] = useState<AdKind>("image-text");
+  const [coin, setCoin] = useState("usdt");
   const [txHash, setTxHash] = useState("");
   const [amount, setAmount] = useState("");
   const [agree, setAgree] = useState(false);
   const [err, setErr] = useState("");
+  const [wallets, setWallets] = useState<{ coin: string; address: string }[]>([]);
+  useEffect(() => {
+    void listWallets()
+      .then(setWallets)
+      .catch(() => setWallets([]));
+  }, []);
+  const payTo = wallets.find((w) => w.coin === coin)?.address;
   return (
     <div className="mx-auto max-w-2xl space-y-3 overflow-y-auto p-5">
-      <h2 className="text-xl font-bold">Advertise</h2>
-      <p className="text-sm text-muted">Submit a placement. After you pay, paste the transaction hash. Admin reviews it.</p>
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Campaign name" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
-      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Copy / destination URL" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
-      <select
-        value={placement}
-        onChange={(e) => setPlacement(e.target.value as typeof placement)}
-        className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm"
-      >
-        <option value="sidebar">Sidebar</option>
-        <option value="hero">Hero strip</option>
-        <option value="chat">Above chat</option>
-      </select>
-      <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount (e.g. 50 USDT)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
-      <input value={txHash} onChange={(e) => setTxHash(e.target.value)} placeholder="Crypto tx hash after payment" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <h2 className="text-xl font-bold">Place an ad</h2>
+      <p className="text-sm text-muted">
+        Sign in. Pick a format. Send crypto. Paste the tx. Super admin approves, then it shows on Advert.
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {AD_KINDS.map((k) => (
+          <button key={k.id} type="button" onClick={() => setKind(k.id)} className={`rounded-full px-2 py-1 text-[11px] ${kind === k.id ? "btn-3d font-semibold" : "border border-line text-muted"}`}>
+            {k.label}
+          </button>
+        ))}
+      </div>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Brand / campaign name" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Destination URL (https://…)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      {kind === "image" || kind === "image-text" ? (
+        <input value={image} onChange={(e) => setImage(e.target.value)} placeholder="Image URL" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      ) : null}
+      {kind === "video" || kind === "video-text" ? (
+        <input value={video} onChange={(e) => setVideo(e.target.value)} placeholder="YouTube URL or id (not hosted here)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      ) : null}
+      {kind !== "image" && kind !== "video" ? (
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Short copy" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      ) : null}
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Pay with</div>
+      <div className="flex flex-wrap gap-1">
+        {AD_COINS.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => setCoin(c.id)}
+            className={`rounded-full px-2 py-1 text-[11px] ${coin === c.id ? "btn-3d font-semibold" : "border border-line text-muted"}`}
+          >
+            {c.ticker}
+          </button>
+        ))}
+      </div>
+      <div className="raised rounded-xl p-3 text-xs">
+        <div className="text-muted">Send {AD_COINS.find((c) => c.id === coin)?.label} to</div>
+        <div className="mt-1 break-all font-mono text-[11px]">{payTo || "Wallet not set yet — staff must paste addresses on /ops."}</div>
+      </div>
+      <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount sent (e.g. 40 USDT)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <input value={txHash} onChange={(e) => setTxHash(e.target.value)} placeholder="Transaction hash / payment ID after you pay" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
       {err ? <p className="text-sm text-danger">{err}</p> : null}
       <label className="flex items-start gap-2 text-[11px] text-muted">
         <input type="checkbox" className="mt-0.5" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-        <span>I agree to the Terms. This ad is lawful and I accept review or rejection.</span>
+        <span>I agree to the Terms. I paid from my own wallet. Staff may reject a bad or missing hash.</span>
       </label>
       <button
         type="button"
-        className="rounded-lg border border-line bg-panel-3 px-3 py-2 text-sm"
+        className="btn-3d rounded-lg px-3 py-2 text-sm font-semibold"
         onClick={() => {
           if (!agree) {
-            setErr("Accept the Terms to submit an ad.");
+            setErr("Accept the Terms.");
             return;
           }
-          store.saveAd(name, note, { placement, txHash, amount, status: txHash.trim() ? "paid" : "pending" });
+          if (!name.trim() || !txHash.trim()) {
+            setErr("Name and payment tx are required.");
+            return;
+          }
+          store.saveAd(name, note, {
+            placement: "board",
+            txHash,
+            amount,
+            coin,
+            link: safeHttpUrl(link),
+            image: kind.includes("image") ? safeHttpUrl(image) : undefined,
+            video: kind.includes("video") ? youtubeId(video) || safeHttpUrl(video) : undefined,
+            kind,
+            status: "paid",
+          });
           setName("");
           setNote("");
+          setLink("");
+          setImage("");
+          setVideo("");
           setTxHash("");
           setAmount("");
+          setErr("");
         }}
       >
-        Submit for review
+        Submit for approval
       </button>
       {store.campaigns.map((c) => (
-        <Card key={c.id} title={c.name} body={`${c.status} · ${c.placement}${c.amount ? ` · ${c.amount}` : ""}${c.note ? `\n${c.note}` : ""}`} />
+        <Card key={c.id} title={c.name} body={`${c.status} · ${(c.coin || "").toUpperCase()} ${c.amount || ""}${c.txHash ? `\ntx ${c.txHash}` : ""}`} />
       ))}
     </div>
   );
@@ -551,6 +673,9 @@ function Admin({ store }: { store: Store }) {
   const [grantId, setGrantId] = useState("");
   const [grantRole, setGrantRole] = useState<"mod" | "admin" | "super">("mod");
   const [msg, setMsg] = useState("");
+  const [mail, setMail] = useState<{ id: string; author: string; body: string; ts: number }[]>([]);
+  const [reports, setReports] = useState<{ id: string; post_id: string; author: string; reason: string; ts: number }[]>([]);
+  const [wallets, setWallets] = useState<Record<string, string>>({});
 
   useEffect(() => {
     void staffMe()
@@ -567,6 +692,15 @@ function Admin({ store }: { store: Store }) {
     void listStaff()
       .then((rows) => setStaff(rows))
       .catch(() => setStaff([]));
+    void listMail()
+      .then(setMail)
+      .catch(() => setMail([]));
+    void listReports()
+      .then(setReports)
+      .catch(() => setReports([]));
+    void listWallets()
+      .then((rows) => setWallets(Object.fromEntries(rows.map((w) => [w.coin, w.address]))))
+      .catch(() => undefined);
   }, [role]);
 
   if (!role && !empty) {
@@ -617,8 +751,7 @@ function Admin({ store }: { store: Store }) {
               <div>
                 <div className="font-semibold">{c.name}</div>
                 <div className="text-xs text-muted">
-                  {c.status} · {c.placement}
-                  {c.amount ? ` · ${c.amount}` : ""}
+                  {c.status} · {(c.coin || "").toUpperCase()} {c.amount || ""} · {c.placement}
                 </div>
                 {c.note ? <p className="mt-1 text-sm">{c.note}</p> : null}
                 {c.txHash ? <p className="mt-1 break-all text-[11px] text-muted">tx {c.txHash}</p> : null}
@@ -638,6 +771,70 @@ function Admin({ store }: { store: Store }) {
           </div>
         ))}
       </div>
+      <div className="md:col-span-2 space-y-2">
+        <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Inbox</div>
+        {mail.length === 0 ? <p className="text-sm text-muted">No contact mail.</p> : null}
+        {mail.map((m) => (
+          <div key={m.id} className="rounded-xl border border-line bg-panel p-3">
+            <div className="text-xs font-semibold">{m.author}</div>
+            <p className="mt-1 text-sm">{m.body}</p>
+          </div>
+        ))}
+      </div>
+      <div className="md:col-span-2 space-y-2">
+        <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Reports</div>
+        {reports.length === 0 ? <p className="text-sm text-muted">No flags.</p> : null}
+        {reports.map((r) => (
+          <div key={r.id} className="flex items-center justify-between gap-2 rounded-xl border border-line bg-panel p-3">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold">{r.author}</div>
+              <p className="text-sm">{r.reason}</p>
+              <div className="text-[10px] text-muted">post {r.post_id}</div>
+            </div>
+            <button type="button" className="shrink-0 text-xs text-danger" onClick={() => store.hidePost(r.post_id)}>
+              Hide post
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="md:col-span-2 space-y-2">
+        <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Feeds moderation</div>
+        {store.posts.map((p) => (
+          <div key={p.id} className="flex items-center justify-between gap-2 rounded-xl border border-line bg-panel p-3">
+            <div className="min-w-0">
+              <div className="truncate font-semibold">{p.title}</div>
+              <div className="text-xs text-muted">{p.author}</div>
+            </div>
+            <button type="button" className="shrink-0 text-xs text-danger" onClick={() => store.hidePost(p.id)}>
+              Hide
+            </button>
+          </div>
+        ))}
+      </div>
+      {role === "super" || role === "admin" ? (
+        <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
+          <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Pay-to wallets</div>
+          <p className="text-xs text-muted">Users send BTC / SOL / USDC / ETH here. Paste your real addresses.</p>
+          {AD_COINS.map((c) => (
+            <div key={c.id} className="flex gap-2">
+              <span className="w-14 shrink-0 pt-2 text-[10px] font-bold text-muted">{c.ticker}</span>
+              <input
+                value={wallets[c.id] ?? ""}
+                onChange={(e) => setWallets((w) => ({ ...w, [c.id]: e.target.value }))}
+                placeholder={`${c.label} address`}
+                className="flex-1 rounded-lg border border-line bg-panel px-3 py-2 font-mono text-xs"
+              />
+              <button
+                type="button"
+                className="rounded border border-line px-2 text-xs"
+                onClick={() => void saveWallet({ data: { coin: c.id, address: wallets[c.id] ?? "" } })}
+              >
+                Save
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {role === "super" || role === "admin" ? (
         <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
           <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Grant role</div>
@@ -716,8 +913,11 @@ function Help() {
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Help & Terms</h2>
-      <Card title="Rooms" body="Home is live chat. Messages stay on this device until a server is connected." />
-      <Card title="Forum" body="Create post publishes a thread. Open it to comment." />
+      <Card title="Accounts" body="Username + password only. No email on the form. Posts show your username." />
+      <Card title="Chat" body="Signed-in messages save to the server for that room. Purge clears chat only." />
+      <Card title="Feeds & music" body="Create post or Add track after you sign in. Music is a URL to Spotify / Apple / SoundCloud — we do not host files." />
+      <Card title="Ads" body="Submit from Advertise. Staff approve on /ops after you pay off-platform." />
+      <Card title="Staff" body="/ops is not in the public menu. First signed-in owner claims super admin once." />
       <div className="raised whitespace-pre-wrap rounded-xl p-3 text-xs text-muted">{TERMS}</div>
     </div>
   );
@@ -791,6 +991,7 @@ function Contact({ store }: { store: Store }) {
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Contact</h2>
+      <p className="text-sm text-muted">Goes to staff inbox. Sign in first. Do not send passwords.</p>
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
@@ -800,17 +1001,17 @@ function Contact({ store }: { store: Store }) {
       />
       <button
         type="button"
-        className="rounded-lg border border-line bg-panel-3 px-3 py-2 text-sm"
+        className="btn-3d rounded-lg px-3 py-2 text-sm"
         onClick={() => {
           if (!body.trim()) return;
-          store.saveAd("Contact", body.trim());
+          store.sendContact(body);
           setBody("");
           setSent(true);
         }}
       >
-        Send note
+        Send to staff
       </button>
-      {sent ? <p className="text-sm text-muted">Saved on this device.</p> : null}
+      {sent ? <p className="text-sm text-lime-2">Sent. Staff see it on /ops.</p> : null}
     </div>
   );
 }

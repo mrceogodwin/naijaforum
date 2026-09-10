@@ -15,8 +15,8 @@ import {
   type Team,
 } from "@/lib/qonvo-data";
 import { DEMO_ADS, DEMO_JOINS, DEMO_NOTES, DEMO_POSTS, DEMO_TRACKS } from "@/lib/qonvo-seed";
-import { joinTeamRow, listAds, listMsgs, listPins, listPosts, listTeams, listTracks, purgeMsgs, saveAdRow, saveComment, saveMsg, savePin, savePost, saveTeam, saveTrack } from "@/lib/forum-server";
-import { setAdStatus } from "@/lib/staff-server";
+import { bumpView, getProfile, joinTeamRow, listAds, listJoins, listMsgs, listPins, listPosts, listScores, listTeams, listTracks, purgeMsgs, reportPost, saveAdRow, saveComment, saveJoin, saveMsg, savePin, savePost, saveProfile, saveRx, saveTeam, saveTrack, sendMail } from "@/lib/forum-server";
+import { hidePost as hidePostRow, setAdStatus } from "@/lib/staff-server";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 
 function guestName() {
@@ -39,6 +39,9 @@ export function useQonvo() {
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [pins, setPins] = useState<string[]>([]);
+  const [savedPosts, setSavedPosts] = useState<string[]>([]);
+  const [likes, setLikes] = useState<Record<string, number>>({});
+  const [shares, setShares] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState<Note[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -48,6 +51,9 @@ export function useQonvo() {
   const [openTrack, setOpenTrack] = useState<string | null>(null);
   const [authed, setAuthed] = useState(false);
   const [authErr, setAuthErr] = useState("");
+  const [bio, setBio] = useState("");
+  const [city, setCity] = useState("");
+  const [board, setBoard] = useState<{ name: string; n: number }[]>([]);
 
   const persistNotes = useCallback((next: Note[]) => {
     setNotes(next);
@@ -96,6 +102,9 @@ export function useQonvo() {
     if (!notes0.length) saveJson("notes", notes);
     if (!joins0.length) saveJson("joins", joins);
     setPins(loadJson("pins", []));
+    setSavedPosts(loadJson("savedPosts", []));
+    setLikes(loadJson("postLikes", {}));
+    setShares(loadJson("postShares", {}));
     setTeams(loadJson("teams", []));
     const tracks0 = loadJson<MusicTrack[]>("tracks", []);
     const tracks = [
@@ -122,6 +131,7 @@ export function useQonvo() {
               slug: p.slug ?? undefined,
               status: p.status as Post["status"],
               comments: p.comments ?? [],
+              views: Number(p.views ?? 0),
             })),
           );
         }
@@ -139,6 +149,14 @@ export function useQonvo() {
           );
         }
         if (dbAds.length) setCampaigns(dbAds);
+      })
+      .catch(() => undefined);
+    void listScores()
+      .then(setBoard)
+      .catch(() => undefined);
+    void listJoins()
+      .then((rows) => {
+        if (rows.length) setJoins(rows);
       })
       .catch(() => undefined);
   }, []);
@@ -164,17 +182,25 @@ export function useQonvo() {
       void listTeams()
         .then(setTeams)
         .catch(() => undefined);
+      void getProfile()
+        .then((p) => {
+          if (p.handle) {
+            setHandle(p.handle);
+            saveJson("me", p.handle);
+            saveJson("authed", p.handle);
+          }
+          setBio(p.bio);
+          setCity(p.city);
+        })
+        .catch(() => undefined);
     } else {
       setAuthed(false);
     }
   }, [session.isPending, session.user]);
 
   const recordJoin = useCallback((name: string, room?: string) => {
-    setJoins((prev) => {
-      const next = [{ name, ts: Date.now(), room }, ...prev.filter((j) => j.name !== name)].slice(0, 20);
-      saveJson("joins", next);
-      return next;
-    });
+    setJoins((prev) => [{ name, ts: Date.now(), room }, ...prev.filter((j) => j.name !== name)].slice(0, 20));
+    void saveJoin({ data: { name, room } }).catch(() => undefined);
   }, []);
 
   const openRoom = useCallback((id: string) => {
@@ -250,14 +276,35 @@ export function useQonvo() {
     return false;
   }, [authed, handle, note, session.user]);
 
-  const rename = useCallback((name: string) => {
+  const rename = useCallback((name: string, extra?: { bio?: string; city?: string }) => {
     const next = name.trim().slice(0, 24);
     if (!next) return;
     setHandle(next);
     saveJson("me", next);
+    if (extra?.bio !== undefined) setBio(extra.bio);
+    if (extra?.city !== undefined) setCity(extra.city);
+    void saveProfile({ data: { handle: next, bio: extra?.bio ?? bio, city: extra?.city ?? city } }).catch(() => undefined);
     recordJoin(next, roomId);
     note(`Handle set to ${next}`);
-  }, [note, recordJoin, roomId]);
+  }, [bio, city, note, recordJoin, roomId]);
+
+  const sendContact = useCallback(
+    (text: string) => {
+      const body = text.trim();
+      if (!body) return;
+      if (!needAccount()) return;
+      void sendMail({ data: body }).catch(() => undefined);
+      note("Message sent to staff");
+    },
+    [needAccount, note],
+  );
+
+  const hidePost = useCallback((id: string) => {
+    setPosts((prev) => prev.filter((p) => p.id !== id));
+    if (openPost === id) setOpenPost(null);
+    void hidePostRow({ data: id }).catch(() => undefined);
+    note("Post hidden");
+  }, [note, openPost]);
 
   const send = useCallback(
     (text: string) => {
@@ -274,18 +321,26 @@ export function useQonvo() {
 
   const react = useCallback(
     (ts: number, kind: string) => {
-      setMsgs((prev) => {
-        const next = prev.map((m) => {
+      setMsgs((prev) =>
+        prev.map((m) => {
           if (m.ts !== ts) return m;
           const rx = { ...(m.rx ?? {}) };
           rx[kind] = (rx[kind] ?? 0) + 1;
           return { ...m, rx };
-        });
-        saveJson(`msgs.${roomId}`, next);
-        return next;
-      });
+        }),
+      );
+      void saveRx({ data: { roomId, ts, kind } }).catch(() => undefined);
     },
     [roomId],
+  );
+
+  const flagPost = useCallback(
+    (postId: string, reason: string) => {
+      if (!needAccount()) return;
+      void reportPost({ data: { postId, reason } }).catch(() => undefined);
+      note("Report sent to staff");
+    },
+    [needAccount, note],
   );
 
   const purgeChat = useCallback(() => {
@@ -361,20 +416,52 @@ export function useQonvo() {
   );
 
   const commentPost = useCallback(
-    (postId: string, body: string) => {
+    (postId: string, body: string, parentTs?: number) => {
       const text = body.trim();
       if (!text) return;
       if (!needAccount()) return;
       const who = session.user?.displayName || ensureHandle();
+      const ts = Date.now();
       setPosts((prev) =>
         prev.map((p) =>
-          p.id === postId ? { ...p, comments: [...p.comments, { author: who, body: text, ts: Date.now() }] } : p,
+          p.id === postId ? { ...p, comments: [...p.comments, { author: who, body: text, ts, parentTs }] } : p,
         ),
       );
-      void saveComment({ data: { postId, body: text } }).catch(() => undefined);
+      void saveComment({ data: { postId, body: text, parentTs } }).catch(() => undefined);
     },
     [ensureHandle, needAccount, session.user],
   );
+
+  const see = useCallback((table: "posts" | "ads" | "tracks", id: string) => {
+    if (table === "posts") setPosts((prev) => prev.map((p) => (p.id === id ? { ...p, views: (p.views ?? 0) + 1 } : p)));
+    if (table === "ads") setCampaigns((prev) => prev.map((a) => (a.id === id ? { ...a, views: (a.views ?? 0) + 1 } : a)));
+    if (table === "tracks") setTracks((prev) => prev.map((t) => (t.id === id ? { ...t, views: (t.views ?? 0) + 1 } : t)));
+    void bumpView({ data: { table, id } }).catch(() => undefined);
+  }, []);
+
+  const likePost = useCallback((id: string) => {
+    setLikes((prev) => {
+      const next = { ...prev, [id]: (prev[id] ?? 0) + 1 };
+      saveJson("postLikes", next);
+      return next;
+    });
+  }, []);
+
+  const savePostMark = useCallback((id: string) => {
+    setSavedPosts((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [id, ...prev];
+      saveJson("savedPosts", next);
+      return next;
+    });
+  }, []);
+
+  const sharePost = useCallback((id: string) => {
+    setShares((prev) => {
+      const next = { ...prev, [id]: (prev[id] ?? 0) + 1 };
+      saveJson("postShares", next);
+      return next;
+    });
+  }, []);
 
   const createTeam = useCallback(
     (name: string) => {
@@ -413,9 +500,15 @@ export function useQonvo() {
         note: text.trim(),
         ts: Date.now(),
         status: extra?.status ?? "pending",
-        placement: extra?.placement ?? "sidebar",
+        placement: extra?.placement ?? "board",
         txHash: extra?.txHash,
         amount: extra?.amount,
+        coin: extra?.coin,
+        link: extra?.link,
+        image: extra?.image,
+        video: extra?.video,
+        kind: extra?.kind ?? "image-text",
+        views: 0,
       } as Campaign;
       setCampaigns((prev) => [row, ...prev]);
       void saveAdRow({
@@ -426,6 +519,11 @@ export function useQonvo() {
           status: row.status,
           amount: extra?.amount,
           txHash: extra?.txHash,
+          coin: extra?.coin,
+          link: extra?.link,
+          image: extra?.image,
+          kind: extra?.kind,
+          video: extra?.video,
         },
       }).catch(() => undefined);
       note(`Ad submitted: ${n}`);
@@ -507,10 +605,12 @@ export function useQonvo() {
     setOpenTrack(null);
   }, []);
 
-  const scores = allRoomMessages().reduce<Record<string, number>>((acc, m) => {
-    acc[m.n] = (acc[m.n] ?? 0) + 1;
-    return acc;
-  }, {});
+  const scores = board.length
+    ? Object.fromEntries(board.map((r) => [r.name, r.n]))
+    : allRoomMessages().reduce<Record<string, number>>((acc, m) => {
+        acc[m.n] = (acc[m.n] ?? 0) + 1;
+        return acc;
+      }, {});
 
   const badges = [
     { id: "msg", label: "First message", on: allRoomMessages().some((m) => m.n === handle) },
@@ -548,10 +648,20 @@ export function useQonvo() {
     publishPost,
     publishTrack,
     commentPost,
+    see,
+    likePost,
+    savePostMark,
+    sharePost,
+    savedPosts,
+    likes,
+    shares,
     createTeam,
     joinTeam,
     saveAd,
     patchAd,
+    hidePost,
+    flagPost,
+    sendContact,
     reset,
     authed,
     authErr,
@@ -559,5 +669,7 @@ export function useQonvo() {
     login,
     logout,
     setJoinHandle: rename,
+    bio,
+    city,
   };
 }
