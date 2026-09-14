@@ -19,12 +19,24 @@
   html,
   body,
   #app {
-    height: 100%;
-    overflow: hidden;
+    min-height: 100%;
+    min-height: 100dvh;
+    min-height: -webkit-fill-available;
     background: var(--color-bg);
     color: var(--color-fg);
     scrollbar-width: thin;
     scrollbar-color: #2a2a2a var(--color-bg);
+  }
+  body {
+    overflow-x: hidden;
+  }
+  @media (min-width: 768px) {
+    html,
+    body,
+    #app {
+      height: 100%;
+      overflow: hidden;
+    }
   }
   body {
     background-image:

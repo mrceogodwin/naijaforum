@@ -257,7 +257,7 @@ export function QonvoApp() {
   }
 
   return (
-    <div className="flex h-svh max-h-svh min-h-0 flex-col overflow-hidden bg-bg text-fg">
+    <div className="kilode-shell flex min-h-dvh flex-col bg-bg text-fg md:h-dvh md:max-h-dvh md:overflow-hidden">
       <header className="z-20 shrink-0 border-b border-white/[0.07] bg-panel/95 backdrop-blur">
         <div className="flex h-12 min-w-0 items-center gap-1.5 px-2 sm:h-14 sm:gap-3 sm:px-3">
           <button
