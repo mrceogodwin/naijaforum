@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { AD_COINS, AD_KINDS, AD_PLACEMENTS, ACCOUNT_KINDS, CHAT_TTLS, COMMUNITIES, POST_CATS, REGIONS, ROOMS, TERMS, chatTtlLabel, fmtCount, handleColor, parseMusicUrl, roomName, safeHttpUrl, slugify, timeLabel, youtubeId, type AccountKind, type AdKind, type AdPlacement, type MenuId, type Post } from "@/lib/qonvo-data";
 import type { useQonvo } from "@/lib/use-qonvo";
-import { claimOps, clearModUser, getModSettings, listMail, listMembers, listModHits, listModUsers, listReports, listStaff, removeStaff, saveChatTtl, saveModSettings, saveWallet, setModHitStatus, setModUser, setStaffRole, staffMe } from "@/lib/staff-server";
+import { claimOps, clearModUser, getModSettings, listMail, listMembers, listModHits, listModUsers, listReports, listStaff, removeStaff, resetUserPassword, saveChatTtl, saveModSettings, saveWallet, setModHitStatus, setModUser, setStaffRole, staffMe } from "@/lib/staff-server";
 import { listWallets, getChatTtl } from "@/lib/forum-server";
+import { listInbox, listNotes, sendDm } from "@/lib/social-server";
 import { authClient } from "@/lib/auth/client";
 import { AccountKindPicker } from "@/components/account-kind";
 import { DEFAULT_MOD, type ModSettings } from "@/lib/moderator";
@@ -28,6 +29,7 @@ export function QonvoScreen({
   else if (id === "profile") view = <Profile store={store} onHome={onHome} />;
   else if (id === "bookmarks") view = <Bookmarks store={store} onHome={onHome} />;
   else if (id === "notifications") view = <Notes store={store} />;
+  else if (id === "inbox") view = <Inbox />;
   else if (id === "teams") view = <Teams store={store} />;
   else if (id === "badges") view = <Badges store={store} />;
   else if (id === "leaderboard") view = <Board store={store} />;
@@ -452,7 +454,13 @@ function Profile({ store, onHome }: { store: Store; onHome?: (id?: string) => vo
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Profile</h2>
-      <Card title={store.handle || "Sign in"} body={`${kindLabel} · ${mine.length} posts · ${store.pins.length} bookmarks · ${songs.length} tracks`} />
+      <Card title={store.handle || "Sign in"} body={`${kindLabel} · ${mine.length} posts · ${store.pins.length} bookmarks · ${songs.length} tracks`}>
+        {store.handle ? (
+          <a href={`/u/${encodeURIComponent(store.handle)}`} className="mt-2 inline-block text-xs text-lime-2">
+            Open public profile
+          </a>
+        ) : null}
+      </Card>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Public username" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
       <div>
         <div className="mb-1 text-[10px] font-bold tracking-wide text-muted uppercase">Account type</div>
@@ -537,12 +545,71 @@ function Bookmarks({ store, onHome }: { store: Store; onHome: (id?: string) => v
 }
 
 function Notes({ store }: { store: Store }) {
+  const [rows, setRows] = useState<{ id: string; text: string; href?: string; ts: number }[]>([]);
+  useEffect(() => {
+    void listNotes()
+      .then(setRows)
+      .catch(() => setRows(store.notes));
+  }, [store.notes]);
+  const list = rows.length ? rows : store.notes;
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Notifications</h2>
-      {store.notes.length === 0 ? <p className="text-sm text-muted">Nothing yet.</p> : null}
-      {store.notes.map((n) => (
-        <Card key={n.id} title={n.text} body={new Date(n.ts).toLocaleString()} />
+      <p className="text-xs text-muted">Replies, comments, and DMs land here when you are signed in.</p>
+      {list.length === 0 ? <p className="text-sm text-muted">Nothing yet.</p> : null}
+      {list.map((n) => (
+        <a key={n.id} href={n.href || "#"} className="block rounded-xl border border-line bg-panel p-3">
+          <div className="font-semibold">{n.text}</div>
+          <div className="text-xs text-muted">{new Date(n.ts).toLocaleString()}</div>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function Inbox() {
+  const [to, setTo] = useState("");
+  const [body, setBody] = useState("");
+  const [msg, setMsg] = useState("");
+  const [rows, setRows] = useState<{ id: string; from: string; to: string; body: string; ts: number }[]>([]);
+  function reload() {
+    void listInbox()
+      .then(setRows)
+      .catch(() => setRows([]));
+  }
+  useEffect(() => {
+    reload();
+  }, []);
+  return (
+    <div className="mx-auto max-w-2xl space-y-3 p-5">
+      <h2 className="text-xl font-bold">Messages</h2>
+      <p className="text-xs text-muted">Private DMs. Username only. Staff cannot read these.</p>
+      <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="Their username" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} placeholder="Message" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      {msg ? <p className="text-sm text-muted">{msg}</p> : null}
+      <button
+        type="button"
+        className="btn-3d rounded-lg px-3 py-2 text-sm"
+        onClick={() => {
+          void sendDm({ data: { to, body } }).then((r) => {
+            if (r.ok) {
+              setBody("");
+              setMsg("Sent.");
+              reload();
+            } else setMsg(r.reason);
+          });
+        }}
+      >
+        Send
+      </button>
+      {rows.map((r) => (
+        <div key={r.id} className="rounded-xl border border-line bg-panel p-3">
+          <div className="text-xs text-lime-2">
+            {r.from} → {r.to}
+          </div>
+          <p className="mt-1 text-sm">{r.body}</p>
+          <div className="text-[10px] text-muted">{new Date(r.ts).toLocaleString()}</div>
+        </div>
       ))}
     </div>
   );
@@ -913,6 +980,7 @@ function Admin({ store }: { store: Store }) {
       {role ? <BanMutePanel members={members} /> : null}
       {role === "super" || role === "admin" ? <ModPanel /> : null}
       {role === "super" || role === "admin" ? <AdminPassword /> : null}
+      {role === "super" || role === "admin" ? <AdminResetPassword members={members} /> : null}
       {role === "super" || role === "admin" ? (
         <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
           <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Pay-to wallets</div>
@@ -998,6 +1066,46 @@ function Admin({ store }: { store: Store }) {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function AdminResetPassword({ members }: { members: { id: string; handle: string }[] }) {
+  const [handle, setHandle] = useState("");
+  const [password, setPassword] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  return (
+    <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Reset a user’s password</div>
+      <p className="text-xs text-muted">No email. If they forget, you set a new one and tell them in chat. Cannot reset the owner.</p>
+      <input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="Username" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="New password (8+)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {msg ? <p className="text-sm text-lime-2">{msg}</p> : null}
+      <button
+        type="button"
+        className="btn-3d rounded-lg px-3 py-2 text-sm"
+        onClick={() => {
+          setErr("");
+          setMsg("");
+          void resetUserPassword({ data: { handle, password } }).then((r) => {
+            if (r.ok) {
+              setMsg(`Password reset for ${r.handle}. Tell them the new one privately.`);
+              setPassword("");
+            } else setErr(r.reason);
+          });
+        }}
+      >
+        Reset password
+      </button>
+      <div className="flex flex-wrap gap-1">
+        {members.slice(0, 16).map((m) => (
+          <button key={m.id} type="button" className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted" onClick={() => setHandle(m.handle)}>
+            {m.handle}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1313,7 +1421,8 @@ function Help() {
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Help & Terms</h2>
       <Card title="Accounts" body="Username + password. Tick Terms. Choose Member, Artist, Writer, Advertiser, or Brand. No public email." />
-      <Card title="Chat" body="Signed-in messages save on the server. Super admin sets how long they live (1 hour to 30 days, or never). Use ‹ › to page older/newer chat." />
+      <Card title="Chat" body="Signed-in messages save on the server. Super admin sets how long they live (1 hour to 30 days, or never). Use ‹ › to page older/newer chat. Tap Translate under a line for Yoruba, Igbo, Hausa, French, Spanish." />
+      <Card title="Profiles & messages" body="Every handle has a public page at /u/username. DMs are under Messages. Notifications fire on comments and replies." />
       <Card title="Feeds & music" body="Create post or Add track after you sign in. Music is a URL to Spotify / Apple / SoundCloud — we do not host files." />
       <Card title="Ads" body="Advert grid $40. Chat stream (scrolls with chat) $250. Pinned at top of Chat $800. Pay crypto, paste tx, staff approve. Super can pin / revoke." />
       <Card title="Staff" body="Tap the logo 5 times or open /ops. First signed-in owner claims super. Nobody else can be made super. Grant and revoke sub-admins only." />

@@ -3,6 +3,7 @@ import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { asAccountKind, type AccountKind } from "@/lib/qonvo-data";
 import { gateText } from "@/lib/mod-cache";
+import { pushNote, userIdByHandle } from "@/lib/social-server";
 
 function nid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -145,6 +146,20 @@ export const saveComment = createServerFn({ method: "POST" })
     if (!gate.ok) return { ok: false as const, reason: gate.reason };
     await sql`insert into nf_comments (id, post_id, user_id, author, body, ts, parent_ts)
       values (${id}, ${data.postId}, ${context.userId}, ${author}, ${gate.text}, ${ts}, ${data.parentTs ?? null})`;
+    try {
+      const post = await sql<{ user_id: string; title: string }>`select user_id, title from nf_posts where id = ${data.postId} limit 1`;
+      if (post[0] && post[0].user_id !== context.userId) {
+        await pushNote(post[0].user_id, `${author} commented on “${post[0].title.slice(0, 40)}”`, `/p/${data.postId}`);
+      }
+      if (data.parentTs) {
+        const parent = await sql<{ user_id: string; author: string }>`select user_id, author from nf_comments where post_id = ${data.postId} and ts = ${data.parentTs} limit 1`;
+        if (parent[0] && parent[0].user_id !== context.userId) {
+          await pushNote(parent[0].user_id, `${author} replied to your comment`, `/p/${data.postId}`);
+        }
+      }
+    } catch {
+      /* notes optional */
+    }
     return { id };
   });
 
@@ -373,6 +388,10 @@ export const saveMsg = createServerFn({ method: "POST" })
       await sql`insert into nf_msgs (id, user_id, room_id, n, t, ts, parent_ts, parent_n, parent_t) values (${id}, ${context.userId}, ${data.roomId}, ${n}, ${gate.text}, ${ts}, ${parentTs ?? null}, ${parentN ?? null}, ${parentT ?? null})`;
     } catch {
       await sql`insert into nf_msgs (id, user_id, room_id, n, t, ts) values (${id}, ${context.userId}, ${data.roomId}, ${n}, ${gate.text}, ${ts})`;
+    }
+    if (parentN && parentN !== n) {
+      const uid = await userIdByHandle(parentN);
+      if (uid) await pushNote(uid, `${n} replied in chat`, "/");
     }
     return { id, n, ts, t: gate.text, parentTs, parentN, parentT };
   });

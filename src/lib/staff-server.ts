@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { hashPassword } from "better-auth/crypto";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { DEFAULT_MOD, type ModSettings } from "@/lib/moderator";
@@ -102,6 +103,30 @@ export const removeStaff = createServerFn({ method: "POST" })
     if (existing.role === "super" || existing.locked) return { ok: false as const, reason: "Cannot remove the owner." };
     await sql`delete from nf_staff where user_id = ${uid}`;
     return { ok: true as const };
+  });
+
+export const resetUserPassword = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((d: { handle: string; password: string }) => d)
+  .handler(async ({ context, data }) => {
+    const me = await staffOf(context.userId);
+    if (me?.role !== "super" && me?.role !== "admin") return { ok: false as const, reason: "Only owner or admin can reset passwords." };
+    const password = data.password.trim();
+    if (password.length < 8) return { ok: false as const, reason: "New password needs 8+ characters." };
+    const sql = await getSql();
+    let uid = data.handle.trim();
+    const named = await sql<{ id: string; name: string }>`select id, name from "user" where lower(name) = ${uid.toLowerCase()} or id = ${uid} limit 1`;
+    if (!named[0]) return { ok: false as const, reason: "No user with that handle." };
+    uid = named[0].id;
+    const target = await staffOf(uid);
+    if ((target?.role === "super" || target?.locked) && uid !== context.userId) {
+      return { ok: false as const, reason: "Cannot reset the owner password." };
+    }
+    const hashed = await hashPassword(password);
+    const acc = await sql<{ id: string }>`select id from account where "userId" = ${uid} and "providerId" = ${"credential"} limit 1`;
+    if (!acc[0]) return { ok: false as const, reason: "That user has no password login." };
+    await sql`update account set password = ${hashed}, "updatedAt" = CURRENT_TIMESTAMP where id = ${acc[0].id}`;
+    return { ok: true as const, handle: named[0].name };
   });
 
 export const setAdPlacement = createServerFn({ method: "POST" })

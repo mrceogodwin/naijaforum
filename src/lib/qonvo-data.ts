@@ -91,6 +91,7 @@ export const MENU = [
   ["dashboard", "Dashboard"],
   ["bookmarks", "My Bookmarks"],
   ["notifications", "Notifications"],
+  ["inbox", "Messages"],
   ["teams", "Teams"],
   ["badges", "Badges"],
   ["leaderboard", "Leaderboard"],
@@ -245,7 +246,7 @@ export const AD_COINS = [
 ] as const;
 
 export type Join = { name: string; ts: number; room?: string };
-export type Note = { id: string; text: string; ts: number };
+export type Note = { id: string; text: string; ts: number; href?: string };
 
 export const PREFIX = "qonvo.v6.";
 

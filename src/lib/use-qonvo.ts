@@ -19,6 +19,7 @@ import {
 } from "@/lib/qonvo-data";
 import { DEMO_ADS, DEMO_JOINS, DEMO_NOTES, DEMO_POSTS, DEMO_TRACKS } from "@/lib/qonvo-seed";
 import { bumpView, getChatTtl, getProfile, joinTeamRow, listAds, listJoins, listMsgs, listPins, listPosts, listScores, listTeams, listTracks, pingPresence, purgeMsgs, reportPost, saveAdRow, saveComment, saveJoin, saveMsg, savePin, savePost, saveProfile, saveRx, saveTeam, saveTrack, sendMail } from "@/lib/forum-server";
+import { listNotes } from "@/lib/social-server";
 import { hidePost as hidePostRow, setAdPlacement, setAdStatus } from "@/lib/staff-server";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { publicUsername } from "@/lib/account-email";
@@ -273,6 +274,11 @@ export function useQonvo() {
         .catch(() => undefined);
       void listTeams()
         .then(setTeams)
+        .catch(() => undefined);
+      void listNotes()
+        .then((rows) => {
+          if (rows.length) setNotes(rows);
+        })
         .catch(() => undefined);
       void getProfile()
         .then((p) => {

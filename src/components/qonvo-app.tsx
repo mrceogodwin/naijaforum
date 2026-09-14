@@ -43,6 +43,8 @@ import { accountEmail, accountEmails, publicUsername } from "@/lib/account-email
 import { authClient } from "@/lib/auth/client";
 import { listWallets } from "@/lib/forum-server";
 import { AccountKindPicker } from "@/components/account-kind";
+import { TranslateBtn } from "@/components/translate-btn";
+import { HandleLink } from "@/components/handle-link";
 
 const EMOJIS = ["😀", "😂", "😍", "🔥", "👍", "🙏", "💯", "🎉", "😢", "😮", "😎", "❤️", "🇳🇬", "👀", "🤔", "💭"];
 
@@ -56,6 +58,7 @@ const ICONS: Record<MenuId, typeof Home> = {
   dashboard: LayoutDashboard,
   bookmarks: Bookmark,
   notifications: Radio,
+  inbox: Mail,
   teams: UsersRound,
   badges: Award,
   leaderboard: Trophy,
@@ -69,7 +72,7 @@ const ICONS: Record<MenuId, typeof Home> = {
 
 const MENU_GROUPS: { label: string; ids: MenuId[] }[] = [
   { label: "Explore", ids: ["home", "forum", "community", "trending", "search"] },
-  { label: "You", ids: ["profile", "dashboard", "create", "bookmarks", "notifications", "teams", "badges"] },
+  { label: "You", ids: ["profile", "dashboard", "create", "bookmarks", "notifications", "inbox", "teams", "badges"] },
   { label: "More", ids: ["leaderboard", "ads", "contact", "settings", "help"] },
 ];
 
@@ -413,6 +416,9 @@ export function QonvoApp() {
                   <button type="button" onClick={store.pinRoom} className="btn-3d ml-1 rounded-full px-3 py-1 text-xs">
                     Bookmark
                   </button>
+                  <button type="button" onClick={() => setDonateOpen(true)} className="ml-1 rounded-full border border-line px-3 py-1 text-[10px] font-semibold text-muted">
+                    Donate
+                  </button>
                 </div>
               </div>
               {store.online.length ? (
@@ -552,9 +558,9 @@ export function QonvoApp() {
                   data-chat-input="1"
                   className="min-h-11 flex-1 rounded-full border border-white/10 bg-white/5 px-3 text-sm outline-none"
                 />
-                <button type="submit" className="btn-3d inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg px-3 text-xs font-bold">
+                <button type="submit" className="btn-3d inline-flex min-h-11 shrink-0 items-center justify-center gap-1 rounded-lg px-3 text-xs font-bold">
                   <Send className="size-3.5" />
-                  <span className="hidden sm:inline">Send</span>
+                  Send
                 </button>
               </form>
                 </>
@@ -744,9 +750,9 @@ export function QonvoApp() {
                 </button>
               ))}
             </div>
-            <div className="border-t border-white/5 px-3 py-2">
-              <button type="button" className="text-[10px] font-semibold tracking-wide text-lime-2 uppercase" onClick={() => { setDonateOpen(true); setMenuOpen(false); }}>
-                Donate
+            <div className="border-t border-white/5 px-3 py-3">
+              <button type="button" className="text-[11px] font-semibold tracking-wide text-lime-2" onClick={() => { setDonateOpen(true); setMenuOpen(false); }}>
+                Donate · keep Kilode up
               </button>
             </div>
           </aside>
@@ -755,15 +761,6 @@ export function QonvoApp() {
       ) : null}
 
       {donateOpen ? <DonateSheet onClose={() => setDonateOpen(false)} /> : null}
-      {screen === "home" && homeTab === "chat" && !donateOpen ? (
-        <button
-          type="button"
-          className="btn-3d fixed right-3 bottom-16 z-20 rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wide md:bottom-5"
-          onClick={() => setDonateOpen(true)}
-        >
-          Donate
-        </button>
-      ) : null}
 
       {joinOpen ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/70 p-4">
@@ -1112,7 +1109,7 @@ function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; s
   const saved = store.savedPosts.includes(post.id);
   const likes = store.likes[post.id] ?? 0;
   const shares = store.shares[post.id] ?? 0;
-  const url = typeof window !== "undefined" ? `${window.location.origin}/?feed=${encodeURIComponent(post.id)}` : "";
+  const url = typeof window !== "undefined" ? `${window.location.origin}/p/${encodeURIComponent(post.slug || post.id)}` : "";
   const shareText = `${post.title} — Kilode`;
   function share(kind: "wa" | "x" | "fb" | "tg" | "copy" | "native") {
     store.sharePost(post.id);
@@ -1143,9 +1140,7 @@ function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; s
               <div className="text-[10px] font-bold tracking-[0.16em] text-lime-2 uppercase">{post.category || "General"}</div>
               <h1 className="mt-1 text-2xl font-extrabold leading-tight">{post.title}</h1>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
-                <span className="font-semibold" style={{ color: handleColor(post.author) }}>
-                  {post.author}
-                </span>
+                <HandleLink handle={post.author} className="text-[11px] font-semibold" />
                 <span>· {timeLabel(post.ts)}</span>
                 <span>· {mins} min read</span>
                 {post.tags ? <span>· {post.tags}</span> : null}
@@ -1201,6 +1196,7 @@ function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; s
             <p key={i}>{para}</p>
           ))}
         </div>
+        <TranslateBtn text={post.body} />
         {post.link ? (
           <a href={post.link} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-1 text-xs text-lime-2">
             <Link2 className="size-3" /> Source
@@ -1213,10 +1209,11 @@ function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; s
           </div>
           {roots.map((c) => (
             <div key={c.ts} className="mt-3 rounded-xl border border-white/5 bg-panel-3/60 p-3 text-sm">
-              <div className="text-[11px] font-semibold" style={{ color: handleColor(c.author) }}>
-                {c.author} <span className="font-normal text-muted">{timeLabel(c.ts)}</span>
+              <div className="text-[11px]">
+                <HandleLink handle={c.author} className="text-[11px] font-semibold" /> <span className="font-normal text-muted">{timeLabel(c.ts)}</span>
               </div>
               <p className="mt-1 leading-6">{c.body}</p>
+              <TranslateBtn text={c.body} />
               <button type="button" className="mt-1 text-[10px] text-lime-2" onClick={() => setReplyTo(c.ts)}>
                 Reply
               </button>
@@ -1454,9 +1451,7 @@ function ChatLine({
         </button>
       ) : null}
       <div className="flex items-baseline gap-2">
-        <span className="text-xs font-bold" style={{ color: handleColor(m.n) }}>
-          {m.n}
-        </span>
+        <HandleLink handle={m.n} />
         <span className="text-[10px] text-muted">{timeLabel(m.ts)}</span>
       </div>
       <div className="text-sm">
@@ -1470,6 +1465,7 @@ function ChatLine({
           ),
         )}
       </div>
+      <TranslateBtn text={m.t} />
       <div className="mt-1 flex gap-3">
         <button type="button" className="text-[11px] text-muted" onClick={() => onReact(m.ts, "up")}>
           + {m.rx?.up ?? 0}
