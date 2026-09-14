@@ -49,6 +49,28 @@ export const ROOMS: Room[] = [
 
 export const REGIONS = ["All", ...Array.from(new Set(ROOMS.map((r) => r.region)))];
 
+export const ACCOUNT_KINDS = [
+  { id: "member", label: "Member", hint: "Chat, feeds, comments" },
+  { id: "artist", label: "Artist", hint: "List music URLs, stage name" },
+  { id: "writer", label: "Writer", hint: "News, blogs, reviews" },
+  { id: "advertiser", label: "Advertiser", hint: "Place ads after you pay" },
+  { id: "brand", label: "Brand / business", hint: "Company page and ads" },
+] as const;
+
+export type AccountKind = (typeof ACCOUNT_KINDS)[number]["id"];
+
+export type ProfileExtra = {
+  kind: AccountKind;
+  stage: string;
+  genre: string;
+  website: string;
+  brand: string;
+};
+
+export function asAccountKind(v: string | null | undefined): AccountKind {
+  return ACCOUNT_KINDS.some((k) => k.id === v) ? (v as AccountKind) : "member";
+}
+
 export const COMMUNITIES = [
   { id: "africa", name: "Africa Hub", region: "Africa" },
   { id: "americas", name: "Americas Hub", region: "Americas" },
@@ -87,7 +109,12 @@ export type ChatMsg = {
   t: string;
   ts: number;
   rx?: Record<string, number>;
+  parentTs?: number;
+  parentN?: string;
+  parentT?: string;
 };
+
+export type PresenceUser = { handle: string; typing: boolean };
 
 export type PostComment = { author: string; body: string; ts: number; parentTs?: number };
 
@@ -164,13 +191,38 @@ export const AD_KINDS: { id: AdKind; label: string }[] = [
   { id: "text", label: "Text + link" },
 ];
 
+export const CHAT_TTLS = [
+  { hours: 1, label: "1 hour" },
+  { hours: 6, label: "6 hours" },
+  { hours: 12, label: "12 hours" },
+  { hours: 24, label: "1 day" },
+  { hours: 48, label: "2 days" },
+  { hours: 72, label: "3 days" },
+  { hours: 168, label: "7 days" },
+  { hours: 336, label: "14 days" },
+  { hours: 720, label: "30 days" },
+  { hours: 0, label: "Never (keep)" },
+] as const;
+
+export function chatTtlLabel(hours: number) {
+  return CHAT_TTLS.find((t) => t.hours === hours)?.label ?? `${hours} hours`;
+}
+
+export const AD_PLACEMENTS = [
+  { id: "board", label: "Advert grid", usd: 40, hint: "Shows in the Advert tab" },
+  { id: "chat", label: "Chat stream · premium", usd: 250, hint: "Scrolls up with live chat" },
+  { id: "chat-pin", label: "Pinned in chat · top", usd: 800, hint: "Stays at the top of Chat" },
+] as const;
+
+export type AdPlacement = (typeof AD_PLACEMENTS)[number]["id"];
+
 export type Campaign = {
   id: string;
   name: string;
   note: string;
   ts: number;
   status: "pending" | "paid" | "approved" | "rejected";
-  placement: "sidebar" | "hero" | "chat" | "board";
+  placement: "sidebar" | "hero" | "chat" | "board" | "chat-pin";
   txHash?: string;
   amount?: string;
   coin?: string;
@@ -198,6 +250,7 @@ export type Note = { id: string; text: string; ts: number };
 export const PREFIX = "qonvo.v6.";
 
 export function loadJson<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
   try {
     const raw = localStorage.getItem(PREFIX + key);
     return raw ? (JSON.parse(raw) as T) : fallback;
@@ -207,6 +260,7 @@ export function loadJson<T>(key: string, fallback: T): T {
 }
 
 export function saveJson(key: string, value: unknown) {
+  if (typeof window === "undefined") return;
   try {
     localStorage.setItem(PREFIX + key, JSON.stringify(value));
   } catch {
@@ -215,6 +269,7 @@ export function saveJson(key: string, value: unknown) {
 }
 
 export function clearAll() {
+  if (typeof window === "undefined") return;
   const drop: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
@@ -241,7 +296,7 @@ export function handleColor(name: string) {
   return `hsl(${h % 360} 62% 64%)`;
 }
 
-export const TERMS = `NaijaForum Terms of Use
+export const TERMS = `Kilode Terms of Use
 
 By creating an account or using post, music, video, or advertising tools you agree:
 

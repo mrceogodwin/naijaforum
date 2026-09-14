@@ -21,6 +21,8 @@ import {
   Send,
   Share2,
   Smile,
+  ChevronLeft,
+  ChevronRight,
   Settings,
   Trophy,
   User,
@@ -29,16 +31,18 @@ import {
   Shield,
   X,
 } from "lucide-react";
-import { MENU, POST_CATS, REGIONS, ROOMS, fmtCount, handleColor, parseMusicUrl, roomName, timeLabel, youtubeId, type Campaign, type MenuId, type Room } from "@/lib/qonvo-data";
+import { ACCOUNT_KINDS, MENU, POST_CATS, REGIONS, ROOMS, AD_COINS, chatTtlLabel, fmtCount, handleColor, parseMusicUrl, roomName, timeLabel, youtubeId, type AccountKind, type Campaign, type ChatMsg, type MenuId, type Room } from "@/lib/qonvo-data";
 import { DIGITAL_TRACKS, VIDEO_CATALOG, VIDEO_SECTIONS } from "@/lib/qonvo-seed";
 import { useQonvo } from "@/lib/use-qonvo";
 import { QonvoScreen } from "@/components/qonvo-screens";
-import { QonvoMark } from "@/components/qonvo-mark";
+import { QonvoMark, KilodeWord } from "@/components/qonvo-mark";
 import { Link } from "@tanstack/react-router";
 import { SignedIn, SignedOut, UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { accountEmail, publicUsername } from "@/lib/account-email";
+import { accountEmail, accountEmails, publicUsername } from "@/lib/account-email";
 import { authClient } from "@/lib/auth/client";
+import { listWallets } from "@/lib/forum-server";
+import { AccountKindPicker } from "@/components/account-kind";
 
 const EMOJIS = ["😀", "😂", "😍", "🔥", "👍", "🙏", "💯", "🎉", "😢", "😮", "😎", "❤️", "🇳🇬", "👀", "🤔", "💭"];
 
@@ -73,6 +77,84 @@ function fmt(n: number) {
   return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "K" : String(n);
 }
 
+function sameDay(a: number, b: number) {
+  const da = new Date(a);
+  const db = new Date(b);
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+}
+
+function chipLabel(ts: number) {
+  const d = new Date(ts);
+  const now = new Date();
+  if (sameDay(ts, now.getTime())) return `Today · ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function mentionParts(text: string, handle: string) {
+  const h = handle.trim();
+  if (!h) return [{ t: text, on: false }];
+  const re = new RegExp(`(@?${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig");
+  const out: { t: string; on: boolean }[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push({ t: text.slice(last, m.index), on: false });
+    out.push({ t: m[0], on: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ t: text.slice(last), on: false });
+  return out.length ? out : [{ t: text, on: false }];
+}
+
+type ChatRow =
+  | { kind: "chip"; key: string; label: string }
+  | { kind: "msg"; key: string; m: ChatMsg }
+  | { kind: "fold"; key: string; author: string; n: number; hidden: ChatMsg[] }
+  | { kind: "ad"; key: string; ad: Campaign };
+
+function chatRows(msgs: ChatMsg[]): ChatRow[] {
+  const live = msgs;
+  const rows: ChatRow[] = [];
+  let i = 0;
+  while (i < live.length) {
+    const m = live[i];
+    const prev = live[i - 1];
+    if (!prev || !sameDay(prev.ts, m.ts) || m.ts - prev.ts > 20 * 60 * 1000) {
+      rows.push({ kind: "chip", key: `c-${m.ts}`, label: chipLabel(m.ts) });
+    }
+    let j = i + 1;
+    while (j < live.length && live[j].n === m.n) j += 1;
+    const run = live.slice(i, j);
+    if (run.length >= 4) {
+      rows.push({ kind: "msg", key: `${run[0].ts}-a`, m: run[0] });
+      rows.push({ kind: "msg", key: `${run[1].ts}-b`, m: run[1] });
+      rows.push({ kind: "fold", key: `f-${run[0].ts}`, author: m.n, n: run.length - 3, hidden: run.slice(2, -1) });
+      rows.push({ kind: "msg", key: `${run[run.length - 1].ts}-z`, m: run[run.length - 1] });
+    } else {
+      for (const item of run) rows.push({ kind: "msg", key: String(item.ts) + item.n, m: item });
+    }
+    i = j;
+  }
+  return rows;
+}
+
+function mixChatAds(rows: ChatRow[], ads: Campaign[]): ChatRow[] {
+  if (!ads.length) return rows;
+  const out: ChatRow[] = [];
+  let n = 0;
+  let ai = 0;
+  for (const row of rows) {
+    out.push(row);
+    if (row.kind !== "msg") continue;
+    n += 1;
+    if (n % 5 !== 0) continue;
+    const ad = ads[ai % ads.length];
+    out.push({ kind: "ad", key: `ad-${n}-${ad.id}`, ad });
+    ai += 1;
+  }
+  return out;
+}
+
 
 export function QonvoApp() {
   const store = useQonvo();
@@ -89,10 +171,19 @@ export function QonvoApp() {
   const [homeTab, setHomeTab] = useState<"chat" | "feeds" | "advert" | "music" | "videos">("feeds");
   const [joinPass, setJoinPass] = useState("");
   const [joinAgree, setJoinAgree] = useState(false);
+  const [joinKind, setJoinKind] = useState<AccountKind>("member");
   const [joinErr, setJoinErr] = useState("");
-  const [purge, setPurge] = useState("18:00:00");
+  const logoTaps = useRef({ n: 0, t: 0 });
+  const [liveOpen, setLiveOpen] = useState(false);
+  const [donateOpen, setDonateOpen] = useState(false);
+  const [purge, setPurge] = useState("--:--:--");
   const scroller = useRef<HTMLDivElement>(null);
+  const stickBottom = useRef(true);
+  const lastMsgCount = useRef(0);
+  const [newCount, setNewCount] = useState(0);
+  const [openFolds, setOpenFolds] = useState<Record<string, boolean>>({});
   const inputRef = useRef<HTMLInputElement>(null);
+  const [replyTo, setReplyTo] = useState<ChatMsg | null>(null);
 
   const room = ROOMS.find((r) => r.id === store.roomId) ?? ROOMS[0];
   const listed = useMemo(
@@ -104,83 +195,133 @@ export function QonvoApp() {
       ),
     [query, region],
   );
-  const hot = useMemo(() => [...ROOMS].sort((a, b) => b.online - a.online).slice(0, 8), []);
 
   useEffect(() => {
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+    stickBottom.current = true;
+    lastMsgCount.current = store.msgs.length;
+    setNewCount(0);
+    setOpenFolds({});
+    setReplyTo(null);
+    requestAnimationFrame(() => scroller.current?.scrollTo({ top: scroller.current.scrollHeight }));
+  }, [store.roomId]);
+
+  useEffect(() => {
+    if (homeTab !== "chat") return;
+    store.bumpPresence(false);
+  }, [homeTab, store.roomId]);
+
+  useEffect(() => {
+    const added = store.msgs.length - lastMsgCount.current;
+    lastMsgCount.current = store.msgs.length;
+    if (added <= 0) return;
+    if (stickBottom.current) {
+      scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
+      setNewCount(0);
+    } else setNewCount((n) => n + added);
   }, [store.msgs]);
 
   const purged = useRef(false);
   useEffect(() => {
-    const end = Date.now() + 18 * 3600 * 1000;
+    purged.current = false;
     const tick = () => {
-      let s = Math.max(0, Math.floor((end - Date.now()) / 1000));
-      const h = String(Math.floor(s / 3600)).padStart(2, "0");
-      const rest = s % 3600;
-      setPurge(`${h}:${String(Math.floor(rest / 60)).padStart(2, "0")}:${String(rest % 60).padStart(2, "0")}`);
-      if (s === 0 && !purged.current) {
-        purged.current = true;
-        store.purgeChat();
+      const hours = store.chatHours;
+      if (!hours) {
+        setPurge("kept");
+        return;
       }
+      const oldest = store.msgs[0]?.ts;
+      const end = oldest ? oldest + hours * 3600_000 : Date.now() + hours * 3600_000;
+      const s = Math.max(0, Math.floor((end - Date.now()) / 1000));
+      const d = Math.floor(s / 86400);
+      const h = String(Math.floor((s % 86400) / 3600)).padStart(2, "0");
+      const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+      const sec = String(s % 60).padStart(2, "0");
+      setPurge(d > 0 ? `${d}d ${h}:${m}:${sec}` : `${h}:${m}:${sec}`);
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [store.chatHours, store.msgs, store.roomId]);
 
   function goHome(roomId?: string) {
-    if (roomId) store.openRoom(roomId);
-    else setHomeTab("feeds");
+    if (roomId) {
+      store.openRoom(roomId);
+      setHomeTab("chat");
+    } else setHomeTab("feeds");
     setScreen("home");
     setMenuOpen(false);
     setRoomsOpen(false);
   }
 
   return (
-    <div className="flex h-dvh max-h-dvh flex-col overflow-hidden bg-bg text-fg">
-      <header className="z-20 shrink-0 border-b border-line bg-panel">
-        <div className="flex h-12 items-center justify-between gap-2 px-3">
-          <button type="button" className="flex items-center gap-2" onClick={() => goHome()}>
-            <QonvoMark className="size-8" />
-            <div className="text-left">
-              <div className="text-base font-extrabold leading-none">
-                Naija<span className="text-lime-2">Forum</span>
-              </div>
-            </div>
+    <div className="flex h-svh max-h-svh min-h-0 flex-col overflow-hidden bg-bg text-fg">
+      <header className="z-20 shrink-0 border-b border-white/[0.07] bg-panel/95 backdrop-blur">
+        <div className="flex h-12 min-w-0 items-center gap-1.5 px-2 sm:h-14 sm:gap-3 sm:px-3">
+          <button
+            type="button"
+            className="shrink-0"
+            aria-label="Staff door"
+            onClick={() => {
+              const now = Date.now();
+              if (now - logoTaps.current.t > 2500) logoTaps.current.n = 0;
+              logoTaps.current.t = now;
+              logoTaps.current.n += 1;
+              if (logoTaps.current.n >= 5) {
+                logoTaps.current.n = 0;
+                window.location.href = session.user ? "/ops" : "/login?next=/ops";
+              }
+            }}
+          >
+            <QonvoMark className="size-7 sm:size-8" />
           </button>
-          <div className="flex items-center gap-2">
-            <span className="hidden items-center gap-1.5 text-[11px] text-lime-2 sm:flex">
-              <span className="size-1.5 rounded-full bg-lime-2" />
+          <button type="button" className="min-w-0 text-left" onClick={() => goHome()} aria-label="Kilode home">
+            <KilodeWord className="block truncate text-[15px] sm:text-[17px]" />
+            <span className="mt-0.5 hidden text-[8px] uppercase tracking-[0.18em] text-muted sm:block">kilode.ng</span>
+          </button>
+          <nav className="mx-auto hidden min-w-0 items-center justify-center gap-1 md:flex">
+            <HomeTab label="Feeds" on={homeTab === "feeds" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("feeds"); setScreen("home"); }} />
+            <HomeTab label="Chat" on={homeTab === "chat" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("chat"); setScreen("home"); }} />
+            <HomeTab label="Advert" on={homeTab === "advert" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("advert"); setScreen("home"); }} />
+            <HomeTab label="Music" on={homeTab === "music" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("music"); setScreen("home"); }} />
+            <HomeTab label="Videos" on={homeTab === "videos" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("videos"); setScreen("home"); }} />
+          </nav>
+          <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+            <span className="hidden items-center gap-1.5 text-[11px] font-medium text-lime-2 sm:flex">
+              <span className="size-1.5 animate-pulse rounded-full bg-lime-2" />
               Live
             </span>
-            <button type="button" className="btn-3d rounded-md px-2 py-1 text-xs md:hidden" onClick={() => setRoomsOpen(true)}>
-              Rooms
-            </button>
-            <button type="button" className="btn-3d rounded-md px-2 py-1 text-xs" onClick={() => setMenuOpen(true)}>
-              <span className="inline-flex items-center gap-1">
-                <Menu className="size-3.5" /> Menu
-              </span>
-            </button>
             {session.isPending ? (
-              <span className="h-7 w-16 animate-pulse rounded-md bg-white/10" />
+              <span className="h-8 w-12 animate-pulse rounded-lg bg-white/10" />
             ) : (
               <>
                 <SignedIn>
                   <UserButton />
                 </SignedIn>
                 <SignedOut>
-                  <Link to="/login" className="btn-3d rounded-md px-2 py-1 text-xs font-semibold">
-                    Sign in
+                  <Link to="/login" search={{}} className="btn-join rounded-lg px-2.5 py-1.5 text-[11px] font-bold sm:px-3 sm:text-xs">
+                    Join
                   </Link>
                 </SignedOut>
               </>
             )}
+            <button type="button" className="grid size-9 place-items-center rounded-lg border border-white/10 bg-panel-2" onClick={() => setMenuOpen(true)} aria-label="Menu">
+              <Menu className="size-4 text-lime-2" />
+            </button>
           </div>
         </div>
-        <div className="inset-well h-7 overflow-hidden border-x-0">
+        <div className="flex flex-nowrap gap-1 overflow-x-auto overscroll-x-contain border-t border-white/[0.05] px-2 py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
+          <HomeTab label="Feeds" on={homeTab === "feeds" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("feeds"); setScreen("home"); }} />
+          <HomeTab label="Chat" on={homeTab === "chat" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("chat"); setScreen("home"); }} />
+          <HomeTab label="Advert" on={homeTab === "advert" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("advert"); setScreen("home"); }} />
+          <HomeTab label="Music" on={homeTab === "music" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("music"); setScreen("home"); }} />
+          <HomeTab label="Videos" on={homeTab === "videos" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("videos"); setScreen("home"); }} />
+          <button type="button" className="nav-pill" onClick={() => setRoomsOpen(true)}>Rooms</button>
+          <button type="button" className="nav-pill" onClick={() => setLiveOpen(true)}>Live</button>
+        </div>
+        <div className="h-7 overflow-hidden border-t border-white/[0.05] bg-panel-2">
           <div className="ticker-track px-4 text-[11px] leading-7 text-muted">
             {[...ROOMS.slice(0, 12), ...ROOMS.slice(0, 12)].map((r, i) => (
-              <button key={r.id + i} type="button" className="shrink-0 hover:text-fg" onClick={() => goHome(r.id)}>
+              <button key={r.id + i} type="button" aria-label={`Open room ${r.name}`} className="shrink-0 hover:text-fg" onClick={() => goHome(r.id)}>
                 {r.name} · {fmt(r.online)}
               </button>
             ))}
@@ -188,7 +329,7 @@ export function QonvoApp() {
               .filter((c) => c.status === "approved")
               .flatMap((c) => [c, c])
               .map((c, i) => (
-                <span key={c.id + "t" + i} className="shrink-0 text-fg/80">
+                <span key={c.id + "t" + i} className="shrink-0 text-lime-2">
                   Ad · {c.name}
                 </span>
               ))}
@@ -198,68 +339,34 @@ export function QonvoApp() {
 
       {screen === "home" ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="hidden shrink-0 items-baseline justify-between border-b border-line px-4 py-2 md:flex">
-            <h1 className="text-lg font-extrabold">
-              Naija's <span className="text-lime-2">Open Forum</span>
-            </h1>
-            <p className="text-[11px] text-muted">Anonymous · Free</p>
-          </div>
-          {store.campaigns.some((c) => c.status === "approved" && c.placement === "hero") ? (
-            <div className="hidden shrink-0 border-b border-line px-4 py-1.5 text-xs text-muted md:block">
-              {store.campaigns
-                .filter((c) => c.status === "approved" && c.placement === "hero")
-                .map((c) => (
-                  <span key={c.id} className="mr-4">
-                    Placement · {c.name}
-                  </span>
-                ))}
+          {homeTab === "feeds" ? (
+            <div className="hidden shrink-0 border-b border-white/[0.05] px-4 py-3 md:block">
+              <p className="text-[11px] font-medium text-lime-2">A global forum for every conversation</p>
+              <h1 className="text-xl font-extrabold tracking-tight">
+                Talk Nigeria. <span className="text-lime-2">Live.</span>
+              </h1>
             </div>
           ) : null}
-          <div className="hidden shrink-0 gap-2 overflow-x-auto border-b border-white/5 bg-panel px-3 py-1.5 md:flex">
-            {REGIONS.map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => setRegion(r)}
-                className={`rounded-full px-3 py-1 text-xs ${
-                  region === r ? "btn-3d font-semibold" : "border border-white/10 text-muted"
-                }`}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-          <div className="hidden shrink-0 border-b border-white/5 bg-panel-2 px-3 py-1.5 md:block">
-            <div className="flex gap-2 overflow-x-auto">
-              {hot.map((r) => (
-                <HotCard key={r.id} room={r} active={r.id === store.roomId} onOpen={goHome} />
-              ))}
+          {homeTab === "feeds" || homeTab === "music" ? (
+            <div className="flex shrink-0 justify-end gap-1 border-b border-white/[0.05] px-2 py-1">
+              {homeTab === "feeds" ? (
+                <button type="button" className="btn-join rounded-md px-2.5 py-1 text-[11px] font-bold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
+                  New post
+                </button>
+              ) : (
+                <button type="button" className="btn-join rounded-md px-2.5 py-1 text-[11px] font-bold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
+                  Add track
+                </button>
+              )}
             </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line bg-panel px-2 py-1.5">
-            <HomeTab label="Chat" on={homeTab === "chat"} onClick={() => setHomeTab("chat")} />
-            <HomeTab label="Feeds" on={homeTab === "feeds"} onClick={() => setHomeTab("feeds")} />
-            <HomeTab label="Advert" on={homeTab === "advert"} onClick={() => setHomeTab("advert")} />
-            <HomeTab label="Music" on={homeTab === "music"} onClick={() => setHomeTab("music")} />
-            <HomeTab label="Videos" on={homeTab === "videos"} onClick={() => setHomeTab("videos")} />
-            {homeTab === "feeds" ? (
-              <button type="button" className="btn-3d ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
-                New
-              </button>
-            ) : null}
-            {homeTab === "music" ? (
-              <button type="button" className="btn-3d ml-auto shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
-                Add
-              </button>
-            ) : null}
-          </div>
+          ) : null}
 
-          <div className="grid min-h-0 flex-1 overflow-hidden md:grid-cols-[210px_minmax(0,1fr)_180px]">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[210px_minmax(0,1fr)_180px]">
             <aside className="hidden min-h-0 overflow-hidden border-r border-white/5 bg-panel md:flex md:flex-col">
               <RoomList query={query} setQuery={setQuery} listed={listed} roomId={store.roomId} onOpen={goHome} />
             </aside>
 
-            <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-bg">
+            <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-bg">
               {homeTab === "feeds" ? (
                 <FeedPane store={store} />
               ) : homeTab === "music" ? (
@@ -281,50 +388,147 @@ export function QonvoApp() {
                     {fmt(room.online)} · {store.handle || "guest"}
                   </div>
                 </div>
-                <button type="button" onClick={store.pinRoom} className="btn-3d rounded-full px-3 py-1 text-xs">
-                  Bookmark
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Older messages"
+                    disabled={!store.hasOlder}
+                    onClick={() => store.olderChat()}
+                    className={`grid size-7 place-items-center rounded-md border text-sm ${store.hasOlder ? "border-line text-fg" : "border-white/5 text-muted/40"}`}
+                  >
+                    <ChevronLeft className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Newer messages"
+                    disabled={!store.hasNewer}
+                    onClick={() => store.newerChat()}
+                    className={`grid size-7 place-items-center rounded-md border text-sm ${store.hasNewer ? "border-line text-fg" : "border-white/5 text-muted/40"}`}
+                  >
+                    <ChevronRight className="size-3.5" />
+                  </button>
+                  <button type="button" onClick={() => setRoomsOpen(true)} className="btn-3d ml-1 rounded-full px-3 py-1 text-xs md:hidden">
+                    Rooms
+                  </button>
+                  <button type="button" onClick={store.pinRoom} className="btn-3d ml-1 rounded-full px-3 py-1 text-xs">
+                    Bookmark
+                  </button>
+                </div>
               </div>
+              {store.online.length ? (
+                <div className="flex items-center gap-1.5 overflow-x-auto border-b border-white/5 px-3 py-1.5">
+                  {store.online.slice(0, 10).map((u) => (
+                    <span key={u.handle} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line px-1.5 py-0.5" title={u.handle}>
+                      <span className="size-1.5 rounded-full" style={{ background: handleColor(u.handle) }} />
+                      <span className="max-w-[72px] truncate text-[10px]" style={{ color: handleColor(u.handle) }}>{u.handle}</span>
+                    </span>
+                  ))}
+                  {store.typing.filter((n) => n !== store.handle).length ? (
+                    <span className="ml-1 shrink-0 text-[10px] text-lime-2">
+                      {store.typing.filter((n) => n !== store.handle).slice(0, 2).join(", ")} typing
+                      <span className="typing-dots" />
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
               {store.campaigns
-                .filter((c) => c.status === "approved" && c.placement === "chat")
+                .filter((c) => c.status === "approved" && c.placement === "chat-pin")
+                .slice(0, 2)
                 .map((c) => (
-                  <div key={c.id} className="raised mx-3 mt-2 rounded-lg px-3 py-2 text-xs">
-                    Placement · {c.name}
-                    {c.note ? <span className="text-muted"> — {c.note}</span> : null}
-                  </div>
+                  <ChatAdCard key={c.id} ad={c} pinned onView={() => store.see("ads", c.id)} />
                 ))}
-              <div ref={scroller} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+              <div className="relative min-h-0 flex-1">
+              <div
+                ref={scroller}
+                className="h-full space-y-3 overflow-y-auto overscroll-contain p-3 sm:p-4"
+                onScroll={() => {
+                  const el = scroller.current;
+                  if (!el) return;
+                  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+                  stickBottom.current = atBottom;
+                  if (atBottom) setNewCount(0);
+                }}
+              >
                 {store.msgs.length === 0 ? <p className="text-sm text-muted">No messages yet. Be first.</p> : null}
-                {store.msgs.map((m, i) => (
-                  <div key={m.ts + i}>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-xs font-bold" style={{ color: handleColor(m.n) }}>
-                        {m.n}
-                      </span>
-                      <span className="text-[10px] text-muted">{timeLabel(m.ts)}</span>
-                    </div>
-                    <div className="text-sm">{m.t}</div>
-                    <div className="mt-1 flex gap-3">
-                      <button type="button" className="text-[11px] text-muted" onClick={() => store.react(m.ts, "up")}>
-                        + {m.rx?.up ?? 0}
-                      </button>
-                      <button type="button" className="text-[11px] text-muted" onClick={() => store.react(m.ts, "fire")}>
-                        🔥 {m.rx?.fire ?? 0}
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                {mixChatAds(
+                  chatRows(store.msgs),
+                  store.campaigns.filter((c) => c.status === "approved" && c.placement === "chat"),
+                ).map((row) => {
+                  if (row.kind === "chip") {
+                    return (
+                      <div key={row.key} className="flex justify-center">
+                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-muted">{row.label}</span>
+                      </div>
+                    );
+                  }
+                  if (row.kind === "ad") {
+                    return <ChatAdCard key={row.key} ad={row.ad} onView={() => store.see("ads", row.ad.id)} />;
+                  }
+                  if (row.kind === "fold") {
+                    const open = openFolds[row.key];
+                    return (
+                      <div key={row.key}>
+                        <button
+                          type="button"
+                          className="text-[11px] text-lime-2"
+                          onClick={() => setOpenFolds((m) => ({ ...m, [row.key]: !open }))}
+                        >
+                          {open ? "Hide" : `${row.n} more from ${row.author}`}
+                        </button>
+                        {open
+                          ? row.hidden.map((m) => (
+                              <ChatLine key={m.ts + m.n} m={m} handle={store.handle} onReact={store.react} onReply={(msg) => { setReplyTo(msg); inputRef.current?.focus(); }} />
+                            ))
+                          : null}
+                      </div>
+                    );
+                  }
+                  return <ChatLine key={row.key} m={row.m} handle={store.handle} onReact={store.react} onReply={(msg) => { setReplyTo(msg); inputRef.current?.focus(); }} />;
+                })}
+              </div>
+              {newCount > 0 ? (
+                <button
+                  type="button"
+                  className="btn-3d absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full px-3 py-1 text-[11px] font-semibold"
+                  onClick={() => {
+                    stickBottom.current = true;
+                    setNewCount(0);
+                    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+                  }}
+                >
+                  {newCount} new ↓
+                </button>
+              ) : null}
               </div>
               <form
                 className="relative flex shrink-0 gap-2 border-t border-white/5 bg-panel p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  store.send(draft);
+                  if (!(store.authed || session.user)) {
+                    window.location.href = "/login";
+                    return;
+                  }
+                  store.send(draft, replyTo?.ts);
                   setDraft("");
+                  setReplyTo(null);
                   setEmojiOpen(false);
+                  stickBottom.current = true;
+                  setNewCount(0);
+                  store.bumpPresence(false);
                   inputRef.current?.focus();
                 }}
               >
+                {replyTo ? (
+                  <div className="absolute bottom-full left-2 right-2 mb-1 flex items-center justify-between rounded-lg border border-line bg-panel-2 px-2 py-1">
+                    <p className="min-w-0 truncate text-[11px]">
+                      Reply to <span style={{ color: handleColor(replyTo.n) }}>{replyTo.n}</span>
+                      <span className="text-muted"> · {replyTo.t.slice(0, 60)}</span>
+                    </p>
+                    <button type="button" className="shrink-0 text-[11px] text-muted" onClick={() => setReplyTo(null)}>
+                      ×
+                    </button>
+                  </div>
+                ) : null}
                 {emojiOpen ? (
                   <div className="absolute bottom-full left-2 mb-1 grid max-h-36 grid-cols-8 gap-1 overflow-y-auto rounded-xl border border-line bg-panel-2 p-2">
                     {EMOJIS.map((e) => (
@@ -340,12 +544,17 @@ export function QonvoApp() {
                 <input
                   ref={inputRef}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder="Message + emoji"
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    store.bumpPresence(true);
+                  }}
+                  placeholder={store.authed || session.user ? "Message + emoji" : "Sign in to chat"}
+                  data-chat-input="1"
                   className="min-h-11 flex-1 rounded-full border border-white/10 bg-white/5 px-3 text-sm outline-none"
                 />
-                <button type="submit" className="btn-3d inline-flex min-h-11 items-center gap-1 rounded-lg px-3 text-xs font-bold">
-                  <Send className="size-3.5" /> Send
+                <button type="submit" className="btn-3d inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg px-3 text-xs font-bold">
+                  <Send className="size-3.5" />
+                  <span className="hidden sm:inline">Send</span>
                 </button>
               </form>
                 </>
@@ -361,9 +570,13 @@ export function QonvoApp() {
               ))}
               {homeTab === "chat" ? (
               <div className="raised m-2 rounded-xl p-3">
-                <div className="text-[10px] uppercase tracking-wide text-muted">Chat purge</div>
-                <div className="text-base font-extrabold text-danger">{purge}</div>
-                <p className="mt-1 text-[10px] text-muted">Clears this room’s chat only. Feeds, music, videos, and ads stay.</p>
+                <div className="text-[10px] uppercase tracking-wide text-muted">Chat lifetime</div>
+                <div className="text-base font-extrabold text-danger">{purge === "kept" ? "Kept" : purge}</div>
+                <p className="mt-1 text-[10px] text-muted">
+                  {store.chatHours === 0
+                    ? "Super admin set chat to never expire."
+                    : `Messages older than ${chatTtlLabel(store.chatHours)} disappear. Feeds, music, videos, and ads stay.`}
+                </p>
               </div>
               ) : null}
               <div className="raised m-2 rounded-xl p-3">
@@ -402,11 +615,11 @@ export function QonvoApp() {
         </div>
       )}
 
-      <nav className="sticky bottom-0 z-20 grid grid-cols-5 border-t border-line bg-panel pb-[env(safe-area-inset-bottom)] md:hidden">
-        <Tab icon={<Home className="size-4" />} label="Home" on={screen === "home"} onClick={() => setScreen("home")} />
-        <Tab icon={<Users className="size-4" />} label="Forum" on={screen === "forum"} onClick={() => setScreen("forum")} />
-        <Tab icon={<Search className="size-4" />} label="Search" on={screen === "search"} onClick={() => setScreen("search")} />
-        <Tab icon={<Bookmark className="size-4" />} label="Saved" on={screen === "bookmarks"} onClick={() => setScreen("bookmarks")} />
+      <nav className="z-20 grid shrink-0 grid-cols-5 border-t border-line bg-panel pb-[env(safe-area-inset-bottom)] md:hidden">
+        <Tab icon={<Home className="size-4" />} label="Feeds" on={screen === "home" && homeTab === "feeds"} onClick={() => { setScreen("home"); setHomeTab("feeds"); store.setOpenPost(null); }} />
+        <Tab icon={<MessageSquare className="size-4" />} label="Chat" on={screen === "home" && homeTab === "chat"} onClick={() => { setScreen("home"); setHomeTab("chat"); }} />
+        <Tab icon={<Megaphone className="size-4" />} label="Ads" on={screen === "home" && homeTab === "advert"} onClick={() => { setScreen("home"); setHomeTab("advert"); }} />
+        <Tab icon={<Radio className="size-4" />} label="Music" on={screen === "home" && homeTab === "music"} onClick={() => { setScreen("home"); setHomeTab("music"); }} />
         <Tab icon={<Menu className="size-4" />} label="More" on={menuOpen} onClick={() => setMenuOpen(true)} />
       </nav>
 
@@ -437,6 +650,45 @@ export function QonvoApp() {
         </div>
       ) : null}
 
+      {liveOpen ? (
+        <div className="fixed inset-0 z-30 flex md:hidden">
+          <button type="button" className="flex-1 bg-black/60" aria-label="Close live" onClick={() => setLiveOpen(false)} />
+          <aside className="h-full w-[min(300px,88vw)] overflow-y-auto bg-panel">
+            <div className="flex items-center justify-between border-b border-line p-3">
+              <strong>Live</strong>
+              <button type="button" onClick={() => setLiveOpen(false)} aria-label="Close">
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="raised m-2 rounded-xl p-3">
+              <div className="mb-2 text-[10px] font-bold tracking-wide text-muted uppercase">Who just joined</div>
+              {store.joins.length === 0 ? <p className="text-[11px] text-muted">Waiting for joins</p> : null}
+              {store.joins.slice(0, 8).map((j) => (
+                <div key={j.name + j.ts} className="flex items-center justify-between py-1 text-xs">
+                  <span className="truncate text-fg">{j.name}</span>
+                  <span className="max-w-[72px] truncate text-[10px] text-lime-2">{j.room ? roomName(j.room) : "live"}</span>
+                </div>
+              ))}
+            </div>
+            <div className="raised m-2 rounded-xl p-3">
+              <div className="mb-2 text-[10px] font-bold tracking-wide text-muted uppercase">Activity</div>
+              {store.notes.length === 0 ? <p className="text-[11px] text-muted">Quiet right now</p> : null}
+              {store.notes.slice(0, 10).map((n) => (
+                <div key={n.id} className="border-t border-white/5 py-1.5 text-[11px] text-muted">
+                  {n.text}
+                </div>
+              ))}
+            </div>
+            {homeTab === "chat" ? (
+              <div className="raised m-2 rounded-xl p-3">
+                <div className="text-[10px] uppercase tracking-wide text-muted">Chat lifetime</div>
+                <div className="text-base font-extrabold text-danger">{purge === "kept" ? "Kept" : purge}</div>
+              </div>
+            ) : null}
+          </aside>
+        </div>
+      ) : null}
+
       {menuOpen ? (
         <div className="fixed inset-0 z-30 flex">
           <aside className="flex h-full w-[min(300px,88vw)] flex-col border-r border-line bg-panel">
@@ -444,7 +696,9 @@ export function QonvoApp() {
               <QonvoMark className="size-10" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-bold">{store.handle || "Guest"}</div>
-                <div className="text-[10px] uppercase tracking-wide text-muted">NaijaForum</div>
+                <div className="text-[10px] uppercase tracking-wide text-muted">
+                  {session.user ? ACCOUNT_KINDS.find((k) => k.id === store.kind)?.label ?? "Member" : "Kilode"}
+                </div>
               </div>
               <button type="button" onClick={() => setMenuOpen(false)} aria-label="Close menu">
                 <X className="size-4" />
@@ -490,9 +744,25 @@ export function QonvoApp() {
                 </button>
               ))}
             </div>
+            <div className="border-t border-white/5 px-3 py-2">
+              <button type="button" className="text-[10px] font-semibold tracking-wide text-lime-2 uppercase" onClick={() => { setDonateOpen(true); setMenuOpen(false); }}>
+                Donate
+              </button>
+            </div>
           </aside>
           <button type="button" className="flex-1 bg-black/60" aria-label="Close menu" onClick={() => setMenuOpen(false)} />
         </div>
+      ) : null}
+
+      {donateOpen ? <DonateSheet onClose={() => setDonateOpen(false)} /> : null}
+      {screen === "home" && homeTab === "chat" && !donateOpen ? (
+        <button
+          type="button"
+          className="btn-3d fixed right-3 bottom-16 z-20 rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wide md:bottom-5"
+          onClick={() => setDonateOpen(true)}
+        >
+          Donate
+        </button>
       ) : null}
 
       {joinOpen ? (
@@ -519,7 +789,11 @@ export function QonvoApp() {
             />
             {joinErr ? <p className="mb-2 text-sm text-danger">{joinErr}</p> : null}
             {store.authErr ? <p className="mb-2 text-sm text-danger">{store.authErr}</p> : null}
-            <label className="mb-2 flex items-start gap-2 text-[11px] text-muted">
+            <div className="mb-2">
+              <div className="mb-1 text-[10px] font-bold tracking-wide text-muted uppercase">Joining as (new users)</div>
+              <AccountKindPicker value={joinKind} onChange={setJoinKind} />
+            </div>
+            <label className="mb-2 flex items-start gap-2 rounded-lg border border-line p-2 text-[11px] text-muted">
               <input type="checkbox" className="mt-0.5" checked={joinAgree} onChange={(e) => setJoinAgree(e.target.checked)} />
               <span>
                 I agree to the{" "}
@@ -550,6 +824,11 @@ export function QonvoApp() {
                       setJoinErr("Accept the Terms to register.");
                       return;
                     }
+                    try {
+                      sessionStorage.setItem("nf_account", JSON.stringify({ kind: joinKind }));
+                    } catch {
+                      /* ignore */
+                    }
                     const r = await authClient.signUp.email({ email: accountEmail(handle), password: joinPass, name: handle });
                     if (r.error) setJoinErr(r.error.message ?? "Sign up failed");
                     else window.location.reload();
@@ -565,9 +844,16 @@ export function QonvoApp() {
                   void (async () => {
                     setJoinErr("");
                     const handle = publicUsername(joinName);
-                    const r = await authClient.signIn.email({ email: accountEmail(handle), password: joinPass });
-                    if (r.error) setJoinErr(r.error.message ?? "Sign in failed");
-                    else window.location.reload();
+                    let last = "Sign in failed";
+                    for (const email of accountEmails(handle)) {
+                      const r = await authClient.signIn.email({ email, password: joinPass });
+                      if (!r.error) {
+                        window.location.reload();
+                        return;
+                      }
+                      last = r.error.message ?? last;
+                    }
+                    setJoinErr(last);
                   })();
                 }}
               >
@@ -664,7 +950,7 @@ function MusicPane({ store, onAdd }: { store: ReturnType<typeof useQonvo>; onAdd
     const on = play === t.id;
     return (
       <div className="raised overflow-hidden rounded-lg">
-        <button type="button" className="flex w-full items-center gap-2 px-2 py-1.5 text-left" onClick={() => {
+        <button type="button" data-play="1" className="flex w-full items-center gap-2 px-2 py-1.5 text-left" onClick={() => {
           setPlay(on ? null : t.id);
           if (!on) store.see("tracks", t.id);
         }}>
@@ -698,7 +984,7 @@ function MusicPane({ store, onAdd }: { store: ReturnType<typeof useQonvo>; onAdd
           Add
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 pb-3">
         <div className="grid gap-3 md:grid-cols-2">
           <section>
             <h3 className="mb-1.5 text-[10px] font-bold tracking-wide text-lime-2 uppercase">Artists on this platform</h3>
@@ -770,7 +1056,7 @@ function VideoPane() {
       {play ? (
         <iframe title="video" src={`https://www.youtube.com/embed/${play}?rel=0`} className="h-40 w-full shrink-0 border-0 bg-black" allow="encrypted-media; fullscreen" loading="lazy" />
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 pb-3">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
           {list.slice(0, shown).map((v) => (
             <button
@@ -804,13 +1090,14 @@ function VideoPane() {
 
 function HomeTab({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={`shrink-0 rounded-md px-3 py-1.5 text-[11px] font-bold tracking-wide uppercase ${on ? "btn-3d text-fg" : "border border-white/10 text-muted"}`}>
+    <button type="button" data-tab={label.toLowerCase()} onClick={onClick} className={`nav-pill ${on ? "on" : ""}`}>
       {label}
     </button>
   );
 }
 
 function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; store: ReturnType<typeof useQonvo> }) {
+  const session = useCurrentUserState();
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [replyTo, setReplyTo] = useState<number | null>(null);
@@ -826,7 +1113,7 @@ function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; s
   const likes = store.likes[post.id] ?? 0;
   const shares = store.shares[post.id] ?? 0;
   const url = typeof window !== "undefined" ? `${window.location.origin}/?feed=${encodeURIComponent(post.id)}` : "";
-  const shareText = `${post.title} — NaijaForum`;
+  const shareText = `${post.title} — Kilode`;
   function share(kind: "wa" | "x" | "fb" | "tg" | "copy" | "native") {
     store.sharePost(post.id);
     const u = encodeURIComponent(url);
@@ -955,7 +1242,7 @@ function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; s
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder={store.authed ? (replyTo ? "Reply to comment…" : "Write a comment") : "Sign in to comment"}
+              placeholder={store.authed || session.user ? (replyTo ? "Reply to comment…" : "Write a comment") : "Sign in to comment"}
               className="min-h-10 flex-1 rounded-lg border border-line bg-panel px-3 text-sm"
             />
             <button type="submit" className="btn-3d rounded-lg px-3 text-xs font-semibold">
@@ -1012,10 +1299,10 @@ function FeedPane({ store }: { store: ReturnType<typeof useQonvo> }) {
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 pb-3">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
           {live.slice(0, shown).map((p) => (
-            <button key={p.id} type="button" className="raised overflow-hidden rounded-lg text-left" onClick={() => store.setOpenPost(p.id)}>
+            <button key={p.id} type="button" data-feed-card="1" className="raised overflow-hidden rounded-lg text-left" onClick={() => store.setOpenPost(p.id)}>
               {p.image ? <img src={p.image} alt="" className="h-28 w-full object-cover" /> : <div className="h-28 bg-panel-3" />}
               <div className="p-2">
                 <div className="text-[9px] font-bold tracking-wide text-lime-2 uppercase">{p.category || "General"}</div>
@@ -1051,7 +1338,7 @@ function AdvertPane({ ads, onCreate, onView }: { ads: Campaign[]; onCreate: () =
           Place ad
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 pb-3">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
           {live.slice(0, shown).map((a) => {
             const yt = a.video ? youtubeId(a.video) || a.video : undefined;
@@ -1112,17 +1399,138 @@ function AdvertPane({ ads, onCreate, onView }: { ads: Campaign[]; onCreate: () =
   );
 }
 
-function HotCard({ room, active, onOpen }: { room: Room; active: boolean; onOpen: (id: string) => void }) {
+function ChatAdCard({ ad, pinned, onView }: { ad: Campaign; pinned?: boolean; onView: () => void }) {
+  const href = ad.link || undefined;
+  const inner = (
+    <>
+      <div className="flex items-center justify-between px-2 py-1">
+        <span className="text-[9px] font-bold tracking-wide text-lime-2 uppercase">{pinned ? "Pinned ad" : "Premium ad"}</span>
+        <span className="text-[9px] text-muted">{fmtCount(ad.views ?? 0)} views</span>
+      </div>
+      {ad.image ? <img src={ad.image} alt="" className="h-24 w-full object-cover" /> : null}
+      {ad.video ? (
+        <div className="aspect-video bg-black">
+          <iframe title={ad.name} src={`https://www.youtube.com/embed/${ad.video}`} className="h-full w-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+        </div>
+      ) : null}
+      <div className="px-3 pb-2">
+        <div className="text-sm font-semibold">{ad.name}</div>
+        {ad.note ? <p className="text-[11px] text-muted">{ad.note}</p> : null}
+      </div>
+    </>
+  );
+  const cls = pinned ? "mx-3 mt-2 overflow-hidden rounded-xl border border-lime-2/40 bg-panel" : "overflow-hidden rounded-xl border border-line bg-panel";
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className={`block ${cls}`} onClick={onView}>
+        {inner}
+      </a>
+    );
+  }
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(room.id)}
-      className={`inline-flex w-[132px] shrink-0 flex-col rounded-[10px] border p-2.5 text-left ${
-        active ? "raised" : "border border-white/10 bg-panel-3"
-      }`}
-    >
-      <span className="text-xs font-bold">{room.name}</span>
-      <span className="mt-1 text-[10px] text-muted">{fmt(room.online)} online</span>
+    <button type="button" className={`block w-full text-left ${cls}`} onClick={onView}>
+      {inner}
     </button>
+  );
+}
+
+function ChatLine({
+  m,
+  handle,
+  onReact,
+  onReply,
+}: {
+  m: ChatMsg;
+  handle: string;
+  onReact: (ts: number, kind: "up" | "fire") => void;
+  onReply: (m: ChatMsg) => void;
+}) {
+  const mine = handle && m.n === handle;
+  return (
+    <div className={mine ? "rounded-lg bg-white/[0.03] px-1 py-0.5" : undefined}>
+      {m.parentN && m.parentT ? (
+        <button type="button" className="mb-1 block w-full truncate rounded-md border-l-2 border-lime-2/50 bg-white/[0.03] px-2 py-1 text-left text-[11px] text-muted" onClick={() => onReply(m)}>
+          <span style={{ color: handleColor(m.parentN) }}>{m.parentN}</span> · {m.parentT}
+        </button>
+      ) : null}
+      <div className="flex items-baseline gap-2">
+        <span className="text-xs font-bold" style={{ color: handleColor(m.n) }}>
+          {m.n}
+        </span>
+        <span className="text-[10px] text-muted">{timeLabel(m.ts)}</span>
+      </div>
+      <div className="text-sm">
+        {mentionParts(m.t, handle).map((p, i) =>
+          p.on ? (
+            <span key={i} className="rounded-sm bg-lime-2/15 px-0.5 font-semibold text-lime-2">
+              {p.t}
+            </span>
+          ) : (
+            <span key={i}>{p.t}</span>
+          ),
+        )}
+      </div>
+      <div className="mt-1 flex gap-3">
+        <button type="button" className="text-[11px] text-muted" onClick={() => onReact(m.ts, "up")}>
+          + {m.rx?.up ?? 0}
+        </button>
+        <button type="button" className="text-[11px] text-muted" onClick={() => onReact(m.ts, "fire")}>
+          🔥 {m.rx?.fire ?? 0}
+        </button>
+        <button type="button" className="text-[11px] text-lime-2" onClick={() => onReply(m)}>
+          Reply
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DonateSheet({ onClose }: { onClose: () => void }) {
+  const [wallets, setWallets] = useState<{ coin: string; address: string }[]>([]);
+  const [copied, setCopied] = useState("");
+  useEffect(() => {
+    void listWallets()
+      .then(setWallets)
+      .catch(() => setWallets([]));
+  }, []);
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-end bg-black/50 p-3 sm:place-items-center">
+      <div className="w-full max-w-sm rounded-2xl border border-line bg-panel p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-bold">Keep Kilode up</h2>
+          <button type="button" onClick={onClose} aria-label="Close">
+            <X className="size-4" />
+          </button>
+        </div>
+        <p className="mb-3 text-[11px] text-muted">Send crypto to a wallet below. No account. No processor.</p>
+        <div className="space-y-2">
+          {AD_COINS.map((c) => {
+            const addr = wallets.find((w) => w.coin === c.id)?.address;
+            return (
+              <div key={c.id} className="rounded-lg border border-white/5 px-2 py-1.5">
+                <div className="text-[10px] font-bold tracking-wide text-lime-2 uppercase">{c.ticker}</div>
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted">{addr || "Not set yet — add on /ops"}</span>
+                  {addr ? (
+                    <button
+                      type="button"
+                      className="shrink-0 text-[10px] text-lime-2"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(addr).then(() => {
+                          setCopied(c.id);
+                          setTimeout(() => setCopied(""), 1200);
+                        });
+                      }}
+                    >
+                      {copied === c.id ? "Copied" : "Copy"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }

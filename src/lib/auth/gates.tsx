@@ -100,31 +100,30 @@ export function UserButton() {
   if (!user) return null;
   const label = user.displayName ?? user.primaryEmail ?? "Account";
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-1.5">
       {user.profileImageUrl ? (
         <img
           src={user.profileImageUrl}
           alt=""
-          className="h-8 w-8 rounded-full object-cover"
+          className="h-8 w-8 shrink-0 rounded-full object-cover"
         />
       ) : (
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-black/10 text-sm font-medium dark:bg-white/20">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-lime-2 text-xs font-bold text-white">
           {label.charAt(0).toUpperCase()}
         </span>
       )}
-      <span className="text-sm font-medium">{label}</span>
+      <span className="hidden max-w-[7rem] truncate text-xs font-medium sm:inline">{label}</span>
       {authEnabled && !gateSession && (
         <button
           type="button"
           disabled={signingOut}
           onClick={() => {
             setSigningOut(true);
-            // Success navigates away; on failure re-enable so it can be retried.
             void signOut().catch(() => setSigningOut(false));
           }}
-          className="cursor-pointer text-sm underline-offset-4 opacity-70 hover:underline disabled:cursor-wait disabled:no-underline"
+          className="shrink-0 text-[11px] underline-offset-4 opacity-70 hover:underline disabled:cursor-wait"
         >
-          {signingOut ? "Signing out…" : "Sign out"}
+          {signingOut ? "…" : "Out"}
         </button>
       )}
     </div>

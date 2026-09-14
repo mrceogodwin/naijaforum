@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { AD_COINS, AD_KINDS, COMMUNITIES, POST_CATS, REGIONS, ROOMS, TERMS, fmtCount, handleColor, parseMusicUrl, roomName, safeHttpUrl, slugify, timeLabel, youtubeId, type AdKind, type MenuId, type Post } from "@/lib/qonvo-data";
+import { AD_COINS, AD_KINDS, AD_PLACEMENTS, ACCOUNT_KINDS, CHAT_TTLS, COMMUNITIES, POST_CATS, REGIONS, ROOMS, TERMS, chatTtlLabel, fmtCount, handleColor, parseMusicUrl, roomName, safeHttpUrl, slugify, timeLabel, youtubeId, type AccountKind, type AdKind, type AdPlacement, type MenuId, type Post } from "@/lib/qonvo-data";
 import type { useQonvo } from "@/lib/use-qonvo";
-import { claimOps, listMail, listReports, listStaff, saveWallet, setStaffRole, staffMe } from "@/lib/staff-server";
-import { listWallets } from "@/lib/forum-server";
+import { claimOps, clearModUser, getModSettings, listMail, listMembers, listModHits, listModUsers, listReports, listStaff, removeStaff, saveChatTtl, saveModSettings, saveWallet, setModHitStatus, setModUser, setStaffRole, staffMe } from "@/lib/staff-server";
+import { listWallets, getChatTtl } from "@/lib/forum-server";
 import { authClient } from "@/lib/auth/client";
+import { AccountKindPicker } from "@/components/account-kind";
+import { DEFAULT_MOD, type ModSettings } from "@/lib/moderator";
 
 type Store = ReturnType<typeof useQonvo>;
 
@@ -19,11 +21,11 @@ export function QonvoScreen({
   onForum?: () => void;
 }) {
   let view: React.ReactNode = null;
-  if (id === "forum") view = <Forum store={store} />;
+  if (id === "forum") view = <Forum store={store} onHome={onHome} />;
   else if (id === "create") view = <Create store={store} onForum={onForum} />;
   else if (id === "community") view = <Communities onHome={onHome} />;
   else if (id === "search") view = <Search store={store} onHome={onHome} />;
-  else if (id === "profile") view = <Profile store={store} />;
+  else if (id === "profile") view = <Profile store={store} onHome={onHome} />;
   else if (id === "bookmarks") view = <Bookmarks store={store} onHome={onHome} />;
   else if (id === "notifications") view = <Notes store={store} />;
   else if (id === "teams") view = <Teams store={store} />;
@@ -49,9 +51,7 @@ function Card({ title, body, children }: { title: string; body?: string; childre
   );
 }
 
-function Forum({ store }: { store: Store }) {
-  const post = store.posts.find((p) => p.id === store.openPost);
-  if (post) return <PostDetail post={post} store={store} />;
+function Forum({ store, onHome }: { store: Store; onHome: (roomId?: string) => void }) {
   const live = store.posts.filter((p) => p.status !== "draft");
   return (
     <div className="mx-auto max-w-5xl space-y-3 p-5">
@@ -59,7 +59,7 @@ function Forum({ store }: { store: Store }) {
       {live.length === 0 ? <p className="text-sm text-muted">No posts yet. Create one from Menu.</p> : null}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
         {live.map((p) => (
-          <button key={p.id} type="button" onClick={() => store.setOpenPost(p.id)} className="raised overflow-hidden rounded-lg text-left">
+          <button key={p.id} type="button" onClick={() => { store.setOpenPost(p.id); onHome(); }} className="raised overflow-hidden rounded-lg text-left">
             {p.image ? <img src={p.image} alt="" className="h-28 w-full object-cover" /> : <div className="h-28 bg-panel-3" />}
             <div className="p-2">
               <div className="text-[9px] font-bold tracking-wide text-lime-2 uppercase">{p.category || "General"}</div>
@@ -176,6 +176,10 @@ function Create({ store, onForum }: { store: Store; onForum?: () => void }) {
     setErr("");
     if (!agree) {
       setErr("Accept the Terms to publish.");
+      return;
+    }
+    if (!title.trim() || !body.trim()) {
+      setErr("Title and post content are required.");
       return;
     }
     const url = safeHttpUrl(link);
@@ -393,7 +397,7 @@ function Search({ store, onHome }: { store: Store; onHome: (roomId?: string) => 
           <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Feeds</div>
           {posts.length === 0 ? <p className="text-sm text-muted">No posts match.</p> : null}
           {posts.map((p) => (
-            <button key={p.id} type="button" className="block w-full rounded-xl border border-line bg-panel p-3 text-left" onClick={() => store.setOpenPost(p.id)}>
+            <button key={p.id} type="button" className="block w-full rounded-xl border border-line bg-panel p-3 text-left" onClick={() => { store.setOpenPost(p.id); onHome(); }}>
               <div className="font-semibold">{p.title}</div>
               <div className="text-xs text-muted">{p.author} · {p.category}</div>
             </button>
@@ -423,29 +427,75 @@ function Search({ store, onHome }: { store: Store; onHome: (roomId?: string) => 
   );
 }
 
-function Profile({ store }: { store: Store }) {
+function Profile({ store, onHome }: { store: Store; onHome?: (id?: string) => void }) {
   const [name, setName] = useState(store.handle);
   const [bio, setBio] = useState(store.bio);
   const [city, setCity] = useState(store.city);
+  const [kind, setKind] = useState<AccountKind>(store.kind);
+  const [stage, setStage] = useState(store.stage);
+  const [genre, setGenre] = useState(store.genre);
+  const [website, setWebsite] = useState(store.website);
+  const [brand, setBrand] = useState(store.brand);
   useEffect(() => {
     setName(store.handle);
     setBio(store.bio);
     setCity(store.city);
-  }, [store.bio, store.city, store.handle]);
+    setKind(store.kind);
+    setStage(store.stage);
+    setGenre(store.genre);
+    setWebsite(store.website);
+    setBrand(store.brand);
+  }, [store.bio, store.brand, store.city, store.genre, store.handle, store.kind, store.stage, store.website]);
   const mine = store.posts.filter((p) => p.author === store.handle);
   const songs = store.tracks.filter((t) => t.author === store.handle || t.artist === store.handle);
+  const kindLabel = ACCOUNT_KINDS.find((k) => k.id === kind)?.label ?? "Member";
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Profile</h2>
-      <Card title={store.handle || "Sign in"} body={`${mine.length} posts · ${store.pins.length} bookmarks · ${songs.length} tracks`} />
+      <Card title={store.handle || "Sign in"} body={`${kindLabel} · ${mine.length} posts · ${store.pins.length} bookmarks · ${songs.length} tracks`} />
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Public username" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <div>
+        <div className="mb-1 text-[10px] font-bold tracking-wide text-muted uppercase">Account type</div>
+        <AccountKindPicker value={kind} onChange={setKind} />
+      </div>
+      {kind === "artist" ? (
+        <>
+          <input value={stage} onChange={(e) => setStage(e.target.value)} placeholder="Stage name" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <input value={genre} onChange={(e) => setGenre(e.target.value)} placeholder="Genre (Afrobeats, Highlife…)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+        </>
+      ) : null}
+      {kind === "writer" ? (
+        <>
+          <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Outlet / publication" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <input value={genre} onChange={(e) => setGenre(e.target.value)} placeholder="Beats (politics, music, sport…)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+        </>
+      ) : null}
+      {kind === "advertiser" || kind === "brand" ? (
+        <>
+          <input value={brand} onChange={(e) => setBrand(e.target.value)} placeholder={kind === "brand" ? "Company name" : "Brand name"} className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://your-site.com" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+        </>
+      ) : null}
+      {kind === "artist" ? (
+        <input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="Spotify / Apple / Audiomack URL" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      ) : null}
       <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City (optional)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
       <textarea value={bio} onChange={(e) => setBio(e.target.value)} rows={3} placeholder="Bio" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
-      <button type="button" className="btn-3d rounded-lg px-3 py-2 text-sm" onClick={() => store.rename(name, { bio, city })}>
+      <button
+        type="button"
+        className="btn-3d rounded-lg px-3 py-2 text-sm"
+        onClick={() => store.rename(name, { bio, city, kind, stage, genre, website, brand })}
+      >
         Save profile
       </button>
+      {kind === "artist" ? (
+        <p className="text-[11px] text-muted">Artists list tracks from Music → Add. We never host audio files.</p>
+      ) : null}
+      {kind === "advertiser" || kind === "brand" ? (
+        <p className="text-[11px] text-muted">Place ads from Advertise. Staff approve after your crypto payment.</p>
+      ) : null}
       {mine.map((p) => (
-        <button key={p.id} type="button" className="block w-full rounded-xl border border-line bg-panel p-3 text-left" onClick={() => store.setOpenPost(p.id)}>
+        <button key={p.id} type="button" className="block w-full rounded-xl border border-line bg-panel p-3 text-left" onClick={() => { store.setOpenPost(p.id); onHome?.(); }}>
           <div className="font-semibold">{p.title}</div>
           <div className="text-xs text-muted">{p.category}</div>
         </button>
@@ -563,6 +613,7 @@ function Ads({ store }: { store: Store }) {
   const [image, setImage] = useState("");
   const [video, setVideo] = useState("");
   const [kind, setKind] = useState<AdKind>("image-text");
+  const [place, setPlace] = useState<AdPlacement>("board");
   const [coin, setCoin] = useState("usdt");
   const [txHash, setTxHash] = useState("");
   const [amount, setAmount] = useState("");
@@ -579,8 +630,25 @@ function Ads({ store }: { store: Store }) {
     <div className="mx-auto max-w-2xl space-y-3 overflow-y-auto p-5">
       <h2 className="text-xl font-bold">Place an ad</h2>
       <p className="text-sm text-muted">
-        Sign in. Pick a format. Send crypto. Paste the tx. Super admin approves, then it shows on Advert.
+        Sign in. Pick where it shows. Pay the fee in crypto. Paste the tx. Super admin approves.
       </p>
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Where it shows</div>
+      <div className="grid gap-1.5">
+        {AD_PLACEMENTS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => setPlace(p.id)}
+            className={`rounded-xl border px-3 py-2 text-left ${place === p.id ? "border-lime-2 bg-lime-2/10" : "border-line bg-panel"}`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold">{p.label}</span>
+              <span className="text-[11px] text-lime-2">${p.usd} USD</span>
+            </div>
+            <div className="text-[11px] text-muted">{p.hint}</div>
+          </button>
+        ))}
+      </div>
       <div className="flex flex-wrap gap-1">
         {AD_KINDS.map((k) => (
           <button key={k.id} type="button" onClick={() => setKind(k.id)} className={`rounded-full px-2 py-1 text-[11px] ${kind === k.id ? "btn-3d font-semibold" : "border border-line text-muted"}`}>
@@ -616,7 +684,7 @@ function Ads({ store }: { store: Store }) {
         <div className="text-muted">Send {AD_COINS.find((c) => c.id === coin)?.label} to</div>
         <div className="mt-1 break-all font-mono text-[11px]">{payTo || "Wallet not set yet — staff must paste addresses on /ops."}</div>
       </div>
-      <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount sent (e.g. 40 USDT)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Amount sent (about $${AD_PLACEMENTS.find((p) => p.id === place)?.usd} USD in crypto)`} className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
       <input value={txHash} onChange={(e) => setTxHash(e.target.value)} placeholder="Transaction hash / payment ID after you pay" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
       {err ? <p className="text-sm text-danger">{err}</p> : null}
       <label className="flex items-start gap-2 text-[11px] text-muted">
@@ -636,7 +704,7 @@ function Ads({ store }: { store: Store }) {
             return;
           }
           store.saveAd(name, note, {
-            placement: "board",
+            placement: place,
             txHash,
             amount,
             coin,
@@ -668,14 +736,17 @@ function Ads({ store }: { store: Store }) {
 function Admin({ store }: { store: Store }) {
   const [role, setRole] = useState<string | null>(null);
   const [empty, setEmpty] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState("");
-  const [staff, setStaff] = useState<{ user_id: string; role: string; handle: string | null }[]>([]);
+  const [staff, setStaff] = useState<{ user_id: string; role: string; handle: string | null; locked?: boolean | null }[]>([]);
   const [grantId, setGrantId] = useState("");
-  const [grantRole, setGrantRole] = useState<"mod" | "admin" | "super">("mod");
+  const [grantRole, setGrantRole] = useState<"mod" | "admin">("mod");
   const [msg, setMsg] = useState("");
   const [mail, setMail] = useState<{ id: string; author: string; body: string; ts: number }[]>([]);
   const [reports, setReports] = useState<{ id: string; post_id: string; author: string; reason: string; ts: number }[]>([]);
   const [wallets, setWallets] = useState<Record<string, string>>({});
+  const [members, setMembers] = useState<{ id: string; handle: string; kind?: string }[]>([]);
+  const [walletMsg, setWalletMsg] = useState("");
 
   useEffect(() => {
     void staffMe()
@@ -684,7 +755,11 @@ function Admin({ store }: { store: Store }) {
         setEmpty(s.empty);
         setUserId(s.userId);
       })
-      .catch(() => setRole(null));
+      .catch(() => {
+        setRole(null);
+        setEmpty(false);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -701,13 +776,16 @@ function Admin({ store }: { store: Store }) {
     void listWallets()
       .then((rows) => setWallets(Object.fromEntries(rows.map((w) => [w.coin, w.address]))))
       .catch(() => undefined);
+    void listMembers()
+      .then(setMembers)
+      .catch(() => setMembers([]));
   }, [role]);
 
-  if (!role && !empty) {
+  if (loading) {
     return (
       <div className="mx-auto max-w-sm space-y-3 p-5">
         <h2 className="text-xl font-bold">Staff console</h2>
-        <p className="text-sm text-muted">This account is not staff. Sign in on /login with a staff account.</p>
+        <p className="text-sm text-muted">Checking access…</p>
       </div>
     );
   }
@@ -719,17 +797,28 @@ function Admin({ store }: { store: Store }) {
         <p className="text-sm text-muted">No staff yet. The first signed-in owner becomes super admin. Do this once.</p>
         <button
           type="button"
-          className="btn-3d w-full rounded-lg py-2 text-sm font-semibold"
+          className="btn-join w-full rounded-lg py-2 text-sm font-semibold"
           onClick={() => {
             void claimOps().then((r) => {
-              if (r.ok) setRole("super");
-              else setMsg(r.reason);
+              if (r.ok) {
+                setRole("super");
+                setEmpty(false);
+              } else setMsg(r.reason);
             });
           }}
         >
           Claim super admin
         </button>
         {msg ? <p className="text-sm text-danger">{msg}</p> : null}
+      </div>
+    );
+  }
+
+  if (!role) {
+    return (
+      <div className="mx-auto max-w-sm space-y-3 p-5">
+        <h2 className="text-xl font-bold">Staff console</h2>
+        <p className="text-sm text-muted">This account is not staff. Sign in on the staff door (tap the mark 5 times) with the owner account.</p>
       </div>
     );
   }
@@ -762,6 +851,15 @@ function Admin({ store }: { store: Store }) {
                 </button>
                 <button type="button" className="rounded border border-line px-2 py-1 text-xs" onClick={() => store.patchAd(c.id, { status: "approved" })}>
                   Approve
+                </button>
+                <button type="button" className="rounded border border-line px-2 py-1 text-xs" onClick={() => store.patchAd(c.id, { placement: "chat" })}>
+                  Chat stream
+                </button>
+                <button type="button" className="rounded border border-line px-2 py-1 text-xs" onClick={() => store.patchAd(c.id, { placement: "chat-pin" })}>
+                  Pin in chat
+                </button>
+                <button type="button" className="rounded border border-line px-2 py-1 text-xs" onClick={() => store.patchAd(c.id, { placement: "board" })}>
+                  Advert grid
                 </button>
                 <button type="button" className="rounded border border-line px-2 py-1 text-xs text-danger" onClick={() => store.patchAd(c.id, { status: "rejected" })}>
                   Reject
@@ -811,10 +909,15 @@ function Admin({ store }: { store: Store }) {
           </div>
         ))}
       </div>
+      {role === "super" ? <ChatTtlPanel /> : null}
+      {role ? <BanMutePanel members={members} /> : null}
+      {role === "super" || role === "admin" ? <ModPanel /> : null}
+      {role === "super" || role === "admin" ? <AdminPassword /> : null}
       {role === "super" || role === "admin" ? (
         <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
           <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Pay-to wallets</div>
           <p className="text-xs text-muted">Users send BTC / SOL / USDC / ETH here. Paste your real addresses.</p>
+          {walletMsg ? <p className="text-[11px] text-lime-2">{walletMsg}</p> : null}
           {AD_COINS.map((c) => (
             <div key={c.id} className="flex gap-2">
               <span className="w-14 shrink-0 pt-2 text-[10px] font-bold text-muted">{c.ticker}</span>
@@ -827,7 +930,12 @@ function Admin({ store }: { store: Store }) {
               <button
                 type="button"
                 className="rounded border border-line px-2 text-xs"
-                onClick={() => void saveWallet({ data: { coin: c.id, address: wallets[c.id] ?? "" } })}
+                onClick={() => {
+                  void saveWallet({ data: { coin: c.id, address: wallets[c.id] ?? "" } }).then(() => {
+                    setWalletMsg(`${c.ticker} saved`);
+                    setTimeout(() => setWalletMsg(""), 1500);
+                  });
+                }}
               >
                 Save
               </button>
@@ -835,32 +943,307 @@ function Admin({ store }: { store: Store }) {
           ))}
         </div>
       ) : null}
-      {role === "super" || role === "admin" ? (
+      {role === "super" ? (
         <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
-          <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Grant role</div>
-          <input value={grantId} onChange={(e) => setGrantId(e.target.value)} placeholder="User id from their session" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+          <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Staff access</div>
+          <p className="text-xs text-muted">Only you are super. You grant sub-admin or admin. You can revoke. Nobody can take your seat.</p>
+          <input value={grantId} onChange={(e) => setGrantId(e.target.value)} placeholder="Their username" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
           <select value={grantRole} onChange={(e) => setGrantRole(e.target.value as typeof grantRole)} className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm">
-            <option value="mod">mod</option>
-            <option value="admin">admin</option>
-            <option value="super">super</option>
+            <option value="mod">Sub-admin (mod) — hide, reports, ads</option>
+            <option value="admin">Admin — wallets + moderator too</option>
           </select>
           <button
             type="button"
             className="btn-3d rounded-lg px-3 py-2 text-sm"
             onClick={() => {
               if (!grantId.trim()) return;
-              void setStaffRole({ data: { userId: grantId.trim(), role: grantRole } }).then(() => listStaff().then(setStaff));
+              void setStaffRole({ data: { userId: grantId.trim(), role: grantRole, handle: grantId.trim() } }).then((r) => {
+                if (r && "ok" in r && r.ok === false) setMsg(r.reason);
+                else setMsg("");
+                void listStaff().then(setStaff);
+              });
             }}
           >
-            Save role
+            Grant access
           </button>
+          {msg ? <p className="text-sm text-danger">{msg}</p> : null}
           {staff.map((s) => (
-            <div key={s.user_id} className="text-xs text-muted">
-              {s.handle || s.user_id} · {s.role}
+            <div key={s.user_id} className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted">
+                {s.handle || s.user_id} · {s.locked || s.role === "super" ? "owner (you)" : s.role === "mod" ? "sub-admin" : s.role}
+              </span>
+              {s.role !== "super" && !s.locked ? (
+                <button
+                  type="button"
+                  className="text-danger"
+                  onClick={() => {
+                    void removeStaff({ data: s.user_id }).then(() => listStaff().then(setStaff));
+                  }}
+                >
+                  Revoke
+                </button>
+              ) : null}
             </div>
+          ))}
+          {members.length ? <div className="pt-2 text-[10px] font-bold tracking-wide text-muted uppercase">Registered users</div> : null}
+          {members.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className="block w-full truncate text-left text-[11px] text-muted hover:text-fg"
+              onClick={() => setGrantId(m.handle)}
+            >
+              {m.handle} {m.kind ? `· ${m.kind}` : ""}
+            </button>
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function AdminPassword() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  return (
+    <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Your password</div>
+      <p className="text-xs text-muted">Change it here. No email reset — we never stored a real mailbox.</p>
+      <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="Current password" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <input type="password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="New password (8+)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      {err ? <p className="text-sm text-danger">{err}</p> : null}
+      {msg ? <p className="text-sm text-lime-2">{msg}</p> : null}
+      <button
+        type="button"
+        className="btn-3d rounded-lg px-3 py-2 text-sm"
+        onClick={() => {
+          setErr("");
+          setMsg("");
+          if (next.trim().length < 8) {
+            setErr("New password needs 8+ characters.");
+            return;
+          }
+          void authClient.changePassword({ currentPassword: current, newPassword: next }).then((r) => {
+            if (r.error) setErr(r.error.message ?? "Could not change password.");
+            else {
+              setMsg("Password updated.");
+              setCurrent("");
+              setNext("");
+            }
+          });
+        }}
+      >
+        Update password
+      </button>
+    </div>
+  );
+}
+
+function BanMutePanel({ members }: { members: { id: string; handle: string; kind?: string }[] }) {
+  const [handle, setHandle] = useState("");
+  const [reason, setReason] = useState("");
+  const [rows, setRows] = useState<{ userId: string; handle: string; kind: "ban" | "mute"; until: number; reason: string }[]>([]);
+  const [msg, setMsg] = useState("");
+  const refresh = () => {
+    void listModUsers()
+      .then(setRows)
+      .catch(() => setRows([]));
+  };
+  useEffect(() => {
+    refresh();
+  }, []);
+  const act = (kind: "ban" | "mute", hours: number) => {
+    if (!handle.trim()) return;
+    void setModUser({ data: { handle: handle.trim(), kind, hours, reason } }).then((r) => {
+      if (r && "ok" in r && r.ok === false) setMsg(r.reason);
+      else {
+        setMsg("");
+        setReason("");
+        refresh();
+      }
+    });
+  };
+  return (
+    <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
+      <div className="text-[10px] font-bold tracking-wide text-lime-2 uppercase">Mute & ban</div>
+      <p className="text-xs text-muted">Mute stops chat. Ban stops chat, feeds, ads, and music. Owner cannot be restricted.</p>
+      <input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="Username" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (optional)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
+      <div className="flex flex-wrap gap-1">
+        <button type="button" className="rounded border border-line px-2 py-1 text-[11px]" onClick={() => act("mute", 1)}>Mute 1h</button>
+        <button type="button" className="rounded border border-line px-2 py-1 text-[11px]" onClick={() => act("mute", 24)}>Mute 24h</button>
+        <button type="button" className="rounded border border-line px-2 py-1 text-[11px]" onClick={() => act("mute", 0)}>Mute forever</button>
+        <button type="button" className="rounded border border-line px-2 py-1 text-[11px] text-danger" onClick={() => act("ban", 24)}>Ban 24h</button>
+        <button type="button" className="rounded border border-line px-2 py-1 text-[11px] text-danger" onClick={() => act("ban", 0)}>Ban forever</button>
+      </div>
+      {msg ? <p className="text-sm text-danger">{msg}</p> : null}
+      {rows.length === 0 ? <p className="text-[11px] text-muted">Nobody restricted.</p> : null}
+      {rows.map((r) => (
+        <div key={r.userId} className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-muted">
+            {r.handle} · {r.kind} · {r.until ? `until ${new Date(r.until).toLocaleString()}` : "forever"}
+            {r.reason ? ` · ${r.reason}` : ""}
+          </span>
+          <button type="button" className="text-lime-2" onClick={() => void clearModUser({ data: r.userId }).then(refresh)}>
+            Lift
+          </button>
+        </div>
+      ))}
+      {members.slice(0, 12).map((m) => (
+        <button key={m.id} type="button" className="mr-2 text-[11px] text-muted hover:text-fg" onClick={() => setHandle(m.handle)}>
+          {m.handle}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ChatTtlPanel() {
+  const [hours, setHours] = useState(24);
+  const [saved, setSaved] = useState("");
+  useEffect(() => {
+    void getChatTtl()
+      .then((r) => setHours(r.hours))
+      .catch(() => undefined);
+  }, []);
+  return (
+    <div className="md:col-span-2 raised space-y-2 rounded-xl p-3">
+      <div className="text-[10px] font-bold tracking-wide text-lime-2 uppercase">Chat lifetime</div>
+      <p className="text-xs text-muted">How long user messages stay in Chat before they disappear. Only you set this. Feeds and ads are not touched.</p>
+      <div className="flex flex-wrap gap-1">
+        {CHAT_TTLS.map((t) => (
+          <button
+            key={t.hours}
+            type="button"
+            onClick={() => setHours(t.hours)}
+            className={`rounded-full px-2 py-1 text-[11px] ${hours === t.hours ? "btn-3d font-semibold" : "border border-line text-muted"}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="btn-3d rounded-lg px-3 py-2 text-sm font-semibold"
+        onClick={() => {
+          void saveChatTtl({ data: hours })
+            .then((r) => {
+              setHours(r.hours);
+              setSaved(`Saved · ${chatTtlLabel(r.hours)}`);
+              setTimeout(() => setSaved(""), 2000);
+            })
+            .catch(() => setSaved("Could not save"));
+        }}
+      >
+        Save lifetime
+      </button>
+      {saved ? <span className="ml-2 text-[11px] text-lime-2">{saved}</span> : null}
+    </div>
+  );
+}
+
+function Toggle({ on, label, set }: { on: boolean; label: string; set: (v: boolean) => void }) {
+  return (
+    <label className="flex items-center gap-2 text-[11px]">
+      <input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} />
+      {label}
+    </label>
+  );
+}
+
+function ModPanel() {
+  const [cfg, setCfg] = useState<ModSettings>(DEFAULT_MOD);
+  const [hits, setHits] = useState<{ id: string; surface: string; action: string; hits: string; excerpt: string; author: string; status: string; ts: number }[]>([]);
+  const [saved, setSaved] = useState("");
+  useEffect(() => {
+    void getModSettings()
+      .then(setCfg)
+      .catch(() => undefined);
+    void listModHits()
+      .then(setHits)
+      .catch(() => setHits([]));
+  }, []);
+  function patch(p: Partial<ModSettings>) {
+    setCfg((c) => ({ ...c, ...p }));
+  }
+  return (
+    <div className="md:col-span-2 raised space-y-3 rounded-xl p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="text-[10px] font-bold tracking-wide text-lime-2 uppercase">AI moderator</div>
+          <p className="text-[11px] text-muted">Runs on the write path in milliseconds. No extra API. Safe with heavy traffic.</p>
+        </div>
+        <button type="button" className={`rounded-full px-3 py-1 text-[11px] font-bold ${cfg.enabled ? "btn-3d" : "border border-line text-muted"}`} onClick={() => patch({ enabled: !cfg.enabled })}>
+          {cfg.enabled ? "On" : "Off"}
+        </button>
+      </div>
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">When it hits</div>
+      <div className="flex flex-wrap gap-1">
+        {(["mask", "block", "hold"] as const).map((a) => (
+          <button key={a} type="button" className={`rounded-full px-2 py-1 text-[11px] ${cfg.action === a ? "btn-3d font-semibold" : "border border-line text-muted"}`} onClick={() => patch({ action: a })}>
+            {a === "mask" ? "Mask ***" : a === "block" ? "Block" : "Hold for review"}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <Toggle on={cfg.chat} label="Chat" set={(v) => patch({ chat: v })} />
+        <Toggle on={cfg.feeds} label="Feeds" set={(v) => patch({ feeds: v })} />
+        <Toggle on={cfg.comments} label="Comments" set={(v) => patch({ comments: v })} />
+        <Toggle on={cfg.ads} label="Ads" set={(v) => patch({ ads: v })} />
+        <Toggle on={cfg.music} label="Music notes" set={(v) => patch({ music: v })} />
+      </div>
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Filters</div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <Toggle on={cfg.sexual} label="Sexual / porn" set={(v) => patch({ sexual: v })} />
+        <Toggle on={cfg.insults} label="Abuse / slurs" set={(v) => patch({ insults: v })} />
+        <Toggle on={cfg.scam} label="Scam / giveaway" set={(v) => patch({ scam: v })} />
+        <Toggle on={cfg.links} label="Too many links" set={(v) => patch({ links: v })} />
+        <Toggle on={cfg.shout} label="ALL CAPS shout" set={(v) => patch({ shout: v })} />
+      </div>
+      <textarea value={cfg.custom} onChange={(e) => patch({ custom: e.target.value })} rows={3} placeholder="Extra block words, comma or new line" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-xs" />
+      <textarea value={cfg.allow} onChange={(e) => patch({ allow: e.target.value })} rows={2} placeholder="Allow list (never block these)" className="w-full rounded-lg border border-line bg-panel px-3 py-2 text-xs" />
+      <button
+        type="button"
+        className="btn-3d rounded-lg px-3 py-2 text-sm font-semibold"
+        onClick={() => {
+          void saveModSettings({ data: cfg })
+            .then(() => {
+              setSaved("Saved");
+              setTimeout(() => setSaved(""), 2000);
+            })
+            .catch(() => {
+              setSaved("Could not save");
+              setTimeout(() => setSaved(""), 2500);
+            });
+        }}
+      >
+        Save moderator
+      </button>
+      {saved ? <span className="ml-2 text-[11px] text-lime-2">{saved}</span> : null}
+      <div className="text-[10px] font-bold tracking-wide text-muted uppercase">Hit log</div>
+      {hits.length === 0 ? <p className="text-xs text-muted">Nothing caught yet.</p> : null}
+      {hits.map((h) => (
+        <div key={h.id} className="rounded-lg border border-white/5 p-2 text-[11px]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-semibold text-lime-2">{h.surface}</span>
+            <span className="text-muted">{h.action} · {h.status} · {h.author}</span>
+          </div>
+          <p className="mt-1 text-muted">{h.hits}</p>
+          <p className="mt-1">{h.excerpt}</p>
+          {h.status === "open" ? (
+            <div className="mt-1 flex gap-2">
+              <button type="button" className="text-[10px] text-lime-2" onClick={() => void setModHitStatus({ data: { id: h.id, status: "kept" } }).then(() => setHits((xs) => xs.map((x) => (x.id === h.id ? { ...x, status: "kept" } : x))))}>
+                Keep log
+              </button>
+              <button type="button" className="text-[10px] text-danger" onClick={() => void setModHitStatus({ data: { id: h.id, status: "dropped" } }).then(() => setHits((xs) => xs.map((x) => (x.id === h.id ? { ...x, status: "dropped" } : x))))}>
+                Drop
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -870,6 +1253,13 @@ function Settings({ store }: { store: Store }) {
   const [next, setNext] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [staffRole, setStaffRoleState] = useState<string | null>(null);
+
+  useEffect(() => {
+    void staffMe()
+      .then((s) => setStaffRoleState(s.role))
+      .catch(() => setStaffRoleState(null));
+  }, []);
 
   async function change() {
     setErr("");
@@ -887,11 +1277,13 @@ function Settings({ store }: { store: Store }) {
     }
   }
 
+  const kindLabel = ACCOUNT_KINDS.find((k) => k.id === store.kind)?.label ?? "Member";
+
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Settings</h2>
-      <Card title="Public username" body={store.handle || "Sign in to set one"} />
-      <Card title="Change password" body="You must know the current password. Forgot-password email is not on yet.">
+      <Card title="Public username" body={`${store.handle || "Sign in to set one"} · ${kindLabel}`} />
+      <Card title="Change password" body="Do this while signed in. There is no reset email — this app does not collect your real email, so nobody can mail you a new password.">
         <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="Current password" className="mt-2 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
         <input type="password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="New password" className="mt-2 w-full rounded-lg border border-line bg-panel px-3 py-2 text-sm" />
         {err ? <p className="mt-2 text-sm text-danger">{err}</p> : null}
@@ -900,6 +1292,13 @@ function Settings({ store }: { store: Store }) {
           Update password
         </button>
       </Card>
+      {staffRole ? (
+        <Card title="Staff console" body={`Your staff role: ${staffRole === "mod" ? "sub-admin" : staffRole}. This link is hidden from normal users.`}>
+          <a href="/ops" className="mt-2 inline-block rounded-lg border border-line px-3 py-2 text-sm">
+            Open /ops
+          </a>
+        </Card>
+      ) : null}
       <Card title="This device" body="Signed-in pins and teams save on the server. Clear only wipes extras cached here.">
         <button type="button" className="mt-2 rounded-lg border border-danger/40 px-3 py-2 text-sm text-danger" onClick={store.reset}>
           Clear local extras
@@ -913,21 +1312,22 @@ function Help() {
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Help & Terms</h2>
-      <Card title="Accounts" body="Username + password only. No email on the form. Posts show your username." />
-      <Card title="Chat" body="Signed-in messages save to the server for that room. Purge clears chat only." />
+      <Card title="Accounts" body="Username + password. Tick Terms. Choose Member, Artist, Writer, Advertiser, or Brand. No public email." />
+      <Card title="Chat" body="Signed-in messages save on the server. Super admin sets how long they live (1 hour to 30 days, or never). Use ‹ › to page older/newer chat." />
       <Card title="Feeds & music" body="Create post or Add track after you sign in. Music is a URL to Spotify / Apple / SoundCloud — we do not host files." />
-      <Card title="Ads" body="Submit from Advertise. Staff approve on /ops after you pay off-platform." />
-      <Card title="Staff" body="/ops is not in the public menu. First signed-in owner claims super admin once." />
+      <Card title="Ads" body="Advert grid $40. Chat stream (scrolls with chat) $250. Pinned at top of Chat $800. Pay crypto, paste tx, staff approve. Super can pin / revoke." />
+      <Card title="Staff" body="Tap the logo 5 times or open /ops. First signed-in owner claims super. Nobody else can be made super. Grant and revoke sub-admins only." />
       <div className="raised whitespace-pre-wrap rounded-xl p-3 text-xs text-muted">{TERMS}</div>
     </div>
   );
 }
 
 function Dash({ store, onHome, onForum }: { store: Store; onHome: (id?: string) => void; onForum?: () => void }) {
+  const kindLabel = ACCOUNT_KINDS.find((k) => k.id === store.kind)?.label ?? "Member";
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Dashboard</h2>
-      <Card title={store.handle || "Guest"} body={`${store.posts.length} posts · ${store.pins.length} rooms saved · ${store.notes.length} events`} />
+      <Card title={store.handle || "Guest"} body={`${kindLabel} · ${store.posts.filter((p) => p.author === store.handle).length} of your posts · ${store.pins.length} rooms saved`} />
       <Card title="Your rooms">
         <div className="mt-2 flex flex-wrap gap-2">
           {(store.pins.length ? store.pins : ["global"]).map((id) => (

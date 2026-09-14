@@ -1,23 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ROOMS,
   allRoomMessages,
+  asAccountKind,
   clearAll,
   loadJson,
   saveJson,
+  type AccountKind,
   type Campaign,
   type ChatMsg,
   type Join,
   type MusicTrack,
   type Note,
   type Post,
+  type PresenceUser,
   parseMusicUrl,
   type Team,
 } from "@/lib/qonvo-data";
 import { DEMO_ADS, DEMO_JOINS, DEMO_NOTES, DEMO_POSTS, DEMO_TRACKS } from "@/lib/qonvo-seed";
-import { bumpView, getProfile, joinTeamRow, listAds, listJoins, listMsgs, listPins, listPosts, listScores, listTeams, listTracks, purgeMsgs, reportPost, saveAdRow, saveComment, saveJoin, saveMsg, savePin, savePost, saveProfile, saveRx, saveTeam, saveTrack, sendMail } from "@/lib/forum-server";
-import { hidePost as hidePostRow, setAdStatus } from "@/lib/staff-server";
+import { bumpView, getChatTtl, getProfile, joinTeamRow, listAds, listJoins, listMsgs, listPins, listPosts, listScores, listTeams, listTracks, pingPresence, purgeMsgs, reportPost, saveAdRow, saveComment, saveJoin, saveMsg, savePin, savePost, saveProfile, saveRx, saveTeam, saveTrack, sendMail } from "@/lib/forum-server";
+import { hidePost as hidePostRow, setAdPlacement, setAdStatus } from "@/lib/staff-server";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import { publicUsername } from "@/lib/account-email";
 
 function guestName() {
   return `Guest#${Math.floor(1000 + Math.random() * 9000)}`;
@@ -25,6 +29,19 @@ function guestName() {
 
 function uid() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+type MsgPack = {
+  msgs: ChatMsg[];
+  older?: boolean;
+  newer?: boolean;
+  hours?: number;
+  online?: PresenceUser[];
+  typing?: string[];
+};
+
+function asPack(r: MsgPack | ChatMsg[]): MsgPack {
+  return Array.isArray(r) ? { msgs: r, older: false, newer: false, hours: 24, online: [], typing: [] } : r;
 }
 
 function passKey(name: string, pass: string) {
@@ -53,7 +70,20 @@ export function useQonvo() {
   const [authErr, setAuthErr] = useState("");
   const [bio, setBio] = useState("");
   const [city, setCity] = useState("");
+  const [hasOlder, setHasOlder] = useState(false);
+  const [hasNewer, setHasNewer] = useState(false);
+  const [chatHours, setChatHours] = useState(24);
+  const [kind, setKind] = useState<AccountKind>("member");
+  const [stage, setStage] = useState("");
+  const [genre, setGenre] = useState("");
+  const [website, setWebsite] = useState("");
+  const [brand, setBrand] = useState("");
   const [board, setBoard] = useState<{ name: string; n: number }[]>([]);
+  const [online, setOnline] = useState<PresenceUser[]>([]);
+  const [typing, setTyping] = useState<string[]>([]);
+  const msgsRef = useRef<ChatMsg[]>([]);
+  const hasNewerRef = useRef(false);
+  const lastPing = useRef(0);
 
   const persistNotes = useCallback((next: Note[]) => {
     setNotes(next);
@@ -159,19 +189,81 @@ export function useQonvo() {
         if (rows.length) setJoins(rows);
       })
       .catch(() => undefined);
+    void getChatTtl()
+      .then((r) => setChatHours(r.hours))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
     if (!ready) return;
-    void listMsgs({ data: roomId })
-      .then(setMsgs)
+    void listMsgs({ data: { roomId } })
+      .then((r) => {
+        const pack = asPack(r);
+        setMsgs(pack.msgs);
+        setHasOlder(!!pack.older);
+        setHasNewer(!!pack.newer);
+        if (typeof pack.hours === "number") setChatHours(pack.hours);
+        if (pack.online) setOnline(pack.online);
+        if (pack.typing) setTyping(pack.typing);
+      })
       .catch(() => setMsgs(loadJson(`msgs.${roomId}`, [])));
   }, [roomId, ready]);
 
   useEffect(() => {
+    msgsRef.current = msgs;
+  }, [msgs]);
+  useEffect(() => {
+    hasNewerRef.current = hasNewer;
+  }, [hasNewer]);
+
+  useEffect(() => {
+    if (!ready) return;
+    let dead = false;
+    const tick = () => {
+      if (dead || (typeof document !== "undefined" && document.hidden)) return;
+      const last = msgsRef.current[msgsRef.current.length - 1];
+      const payload = hasNewerRef.current || !last ? { roomId } : { roomId, after: last.ts };
+      void listMsgs({ data: payload })
+        .then((r) => {
+          if (dead) return;
+          const pack = asPack(r);
+          if (pack.online) setOnline(pack.online);
+          if (pack.typing) setTyping(pack.typing);
+          if (typeof pack.hours === "number") setChatHours(pack.hours);
+          if (hasNewerRef.current) return;
+          if (!last) {
+            if (pack.msgs.length) {
+              setMsgs(pack.msgs);
+              setHasOlder(!!pack.older);
+              setHasNewer(!!pack.newer);
+            }
+            return;
+          }
+          if (!pack.msgs.length) return;
+          const known = new Set(msgsRef.current.map((m) => m.ts));
+          const extra = pack.msgs.filter((m) => !known.has(m.ts));
+          if (!extra.length) return;
+          setMsgs((prev) => [...prev, ...extra].slice(-80));
+          setHasNewer(!!pack.newer);
+        })
+        .catch(() => undefined);
+    };
+    const id = window.setInterval(tick, 6500);
+    const onVis = () => {
+      if (!document.hidden) tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      dead = true;
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [ready, roomId]);
+
+  useEffect(() => {
     if (session.isPending) return;
     if (session.user) {
-      const name = session.user.displayName || session.user.primaryEmail || session.user.id.slice(0, 16);
+      const name = publicUsername(session.user.displayName || session.user.primaryEmail || session.user.id.slice(0, 16));
       setHandle(name);
       setAuthed(true);
       saveJson("me", name);
@@ -191,6 +283,38 @@ export function useQonvo() {
           }
           setBio(p.bio);
           setCity(p.city);
+          setKind(asAccountKind(p.kind));
+          setStage(p.stage ?? "");
+          setGenre(p.genre ?? "");
+          setWebsite(p.website ?? "");
+          setBrand(p.brand ?? "");
+          try {
+            const pending = sessionStorage.getItem("nf_account");
+            if (pending) {
+              sessionStorage.removeItem("nf_account");
+              const extra = JSON.parse(pending) as { kind?: string; stage?: string; genre?: string; website?: string; brand?: string };
+              const nextKind = asAccountKind(extra.kind);
+              setKind(nextKind);
+              if (extra.stage) setStage(extra.stage);
+              if (extra.genre) setGenre(extra.genre);
+              if (extra.website) setWebsite(extra.website);
+              if (extra.brand) setBrand(extra.brand);
+              void saveProfile({
+                data: {
+                  handle: p.handle || name,
+                  bio: p.bio,
+                  city: p.city,
+                  kind: nextKind,
+                  stage: extra.stage ?? p.stage,
+                  genre: extra.genre ?? p.genre,
+                  website: extra.website ?? p.website,
+                  brand: extra.brand ?? p.brand,
+                },
+              }).catch(() => undefined);
+            }
+          } catch {
+            /* ignore */
+          }
         })
         .catch(() => undefined);
     } else {
@@ -276,17 +400,33 @@ export function useQonvo() {
     return false;
   }, [authed, handle, note, session.user]);
 
-  const rename = useCallback((name: string, extra?: { bio?: string; city?: string }) => {
+  const rename = useCallback((name: string, extra?: { bio?: string; city?: string; kind?: AccountKind; stage?: string; genre?: string; website?: string; brand?: string }) => {
     const next = name.trim().slice(0, 24);
     if (!next) return;
     setHandle(next);
     saveJson("me", next);
     if (extra?.bio !== undefined) setBio(extra.bio);
     if (extra?.city !== undefined) setCity(extra.city);
-    void saveProfile({ data: { handle: next, bio: extra?.bio ?? bio, city: extra?.city ?? city } }).catch(() => undefined);
+    if (extra?.kind !== undefined) setKind(extra.kind);
+    if (extra?.stage !== undefined) setStage(extra.stage);
+    if (extra?.genre !== undefined) setGenre(extra.genre);
+    if (extra?.website !== undefined) setWebsite(extra.website);
+    if (extra?.brand !== undefined) setBrand(extra.brand);
+    void saveProfile({
+      data: {
+        handle: next,
+        bio: extra?.bio ?? bio,
+        city: extra?.city ?? city,
+        kind: extra?.kind ?? kind,
+        stage: extra?.stage ?? stage,
+        genre: extra?.genre ?? genre,
+        website: extra?.website ?? website,
+        brand: extra?.brand ?? brand,
+      },
+    }).catch(() => undefined);
     recordJoin(next, roomId);
     note(`Handle set to ${next}`);
-  }, [bio, city, note, recordJoin, roomId]);
+  }, [bio, brand, city, genre, kind, note, recordJoin, roomId, stage, website]);
 
   const sendContact = useCallback(
     (text: string) => {
@@ -307,17 +447,104 @@ export function useQonvo() {
   }, [note, openPost]);
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, parentTs?: number) => {
       const body = text.trim();
       if (!body) return;
       if (!needAccount()) return;
-      const who = session.user?.displayName || session.user?.primaryEmail || ensureHandle();
-      setMsgs((prev) => [...prev, { n: who, t: body, ts: Date.now(), rx: {} }]);
-      void saveMsg({ data: { roomId, text: body } }).catch(() => undefined);
-      note(`Sent in ${ROOMS.find((r) => r.id === roomId)?.name ?? roomId}`);
+      void saveMsg({ data: { roomId, text: body, parentTs } }).then((r) => {
+        if (!r || ("ok" in r && r.ok === false)) {
+          note(("reason" in (r ?? {}) ? (r as { reason: string }).reason : null) || "Blocked by the moderator.");
+          return;
+        }
+        const row = r as { n: string; t?: string; ts: number; parentTs?: number; parentN?: string; parentT?: string };
+        if (hasNewer) {
+          void listMsgs({ data: { roomId } }).then((pack) => {
+            const p = asPack(pack);
+            setMsgs(p.msgs);
+            setHasOlder(!!p.older);
+            setHasNewer(!!p.newer);
+            if (p.online) setOnline(p.online);
+            if (p.typing) setTyping(p.typing);
+          }).catch(() => undefined);
+        } else {
+          const parent = parentTs ? msgsRef.current.find((m) => m.ts === parentTs) : undefined;
+          setMsgs((prev) => [
+            ...prev,
+            {
+              n: row.n,
+              t: row.t ?? body,
+              ts: row.ts,
+              rx: {},
+              parentTs: row.parentTs ?? parentTs,
+              parentN: row.parentN ?? parent?.n,
+              parentT: row.parentT ?? parent?.t?.slice(0, 80),
+            },
+          ]);
+        }
+        note(`Sent in ${ROOMS.find((x) => x.id === roomId)?.name ?? roomId}`);
+      }).catch(() => undefined);
     },
-    [ensureHandle, needAccount, note, roomId, session.user],
+    [chatHours, hasNewer, needAccount, note, roomId],
   );
+
+  const bumpPresence = useCallback(
+    (typingOn: boolean) => {
+      if (!session.user && !authed) return;
+      const now = Date.now();
+      if (typingOn && now - lastPing.current < 2500) return;
+      lastPing.current = now;
+      void pingPresence({ data: { roomId, typing: typingOn } })
+        .then((p) => {
+          if (p.online) setOnline(p.online);
+          if (p.typing) setTyping(p.typing);
+        })
+        .catch(() => undefined);
+    },
+    [authed, roomId, session.user],
+  );
+
+  const olderChat = useCallback(() => {
+    const first = msgs[0];
+    if (!first) return;
+    void listMsgs({ data: { roomId, before: first.ts } }).then((pack) => {
+      const p = asPack(pack);
+      if (!p.msgs.length) {
+        setHasOlder(false);
+        return;
+      }
+      setMsgs(p.msgs);
+      setHasOlder(!!p.older);
+      setHasNewer(true);
+    }).catch(() => undefined);
+  }, [chatHours, msgs, roomId]);
+
+  const newerChat = useCallback(() => {
+    const last = msgs[msgs.length - 1];
+    if (!last || !hasNewer) {
+      void listMsgs({ data: { roomId } }).then((pack) => {
+        const p = asPack(pack);
+        setMsgs(p.msgs);
+        setHasOlder(!!p.older);
+        setHasNewer(!!p.newer);
+      }).catch(() => undefined);
+      return;
+    }
+    void listMsgs({ data: { roomId, after: last.ts } }).then((pack) => {
+      const p = asPack(pack);
+      if (!p.msgs.length || !p.newer) {
+        void listMsgs({ data: { roomId } }).then((live) => {
+          const l = asPack(live);
+          setMsgs(l.msgs);
+          setHasOlder(!!l.older);
+          setHasNewer(false);
+        }).catch(() => undefined);
+        return;
+      }
+      setMsgs(p.msgs);
+      setHasOlder(true);
+      setHasNewer(!!p.newer);
+    }).catch(() => undefined);
+  }, [chatHours, hasNewer, msgs, roomId]);
 
   const react = useCallback(
     (ts: number, kind: string) => {
@@ -404,6 +631,11 @@ export function useQonvo() {
           image: draft.image,
           slug: draft.slug,
         },
+      }).then((r) => {
+        if (r && "ok" in r && r.ok === false) {
+          setPosts((prev) => prev.filter((p) => p.id !== item.id));
+          note(r.reason);
+        }
       }).catch(() => undefined);
       if (item.status === "publish") {
         setOpenPost(item.id);
@@ -427,9 +659,16 @@ export function useQonvo() {
           p.id === postId ? { ...p, comments: [...p.comments, { author: who, body: text, ts, parentTs }] } : p,
         ),
       );
-      void saveComment({ data: { postId, body: text, parentTs } }).catch(() => undefined);
+      void saveComment({ data: { postId, body: text, parentTs } }).then((r) => {
+        if (r && "ok" in r && r.ok === false) {
+          setPosts((prev) =>
+            prev.map((p) => (p.id === postId ? { ...p, comments: p.comments.filter((c) => c.ts !== ts) } : p)),
+          );
+          note(r.reason);
+        }
+      }).catch(() => undefined);
     },
-    [ensureHandle, needAccount, session.user],
+    [ensureHandle, needAccount, note, session.user],
   );
 
   const see = useCallback((table: "posts" | "ads" | "tracks", id: string) => {
@@ -536,6 +775,9 @@ export function useQonvo() {
     if (patch.status) {
       void setAdStatus({ data: { id, status: patch.status } }).catch(() => undefined);
     }
+    if (patch.placement === "board" || patch.placement === "chat" || patch.placement === "chat-pin") {
+      void setAdPlacement({ data: { id, placement: patch.placement } }).catch(() => undefined);
+    }
   }, []);
 
   const publishTrack = useCallback(
@@ -641,6 +883,14 @@ export function useQonvo() {
     openRoom,
     rename,
     send,
+    bumpPresence,
+    online,
+    typing,
+    olderChat,
+    newerChat,
+    hasOlder,
+    hasNewer,
+    chatHours,
     react,
     purgeChat,
     pinRoom,
@@ -671,5 +921,10 @@ export function useQonvo() {
     setJoinHandle: rename,
     bio,
     city,
+    kind,
+    stage,
+    genre,
+    website,
+    brand,
   };
 }
