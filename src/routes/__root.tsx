@@ -6,6 +6,22 @@ import appCss from "../styles.css?url";
 
 const base = seoHead({ path: "/" });
 
+function Boot({ title, body, action }: { title: string; body: string; action?: React.ReactNode }) {
+  return (
+    <div className="grid min-h-svh place-items-center bg-[#0a0a0a] p-6 text-[#f4f4f5]">
+      <div className="max-w-sm text-center">
+        <div className="mx-auto mb-3 grid size-10 place-items-center rounded-xl border border-white/10 bg-[#141414] text-xl font-black text-[#8fbc8f]">
+          !
+        </div>
+        <div className="text-xl font-extrabold tracking-tight">Kilode</div>
+        <p className="mt-1 text-sm font-semibold">{title}</p>
+        <p className="mt-2 text-sm text-white/50">{body}</p>
+        {action}
+      </div>
+    </div>
+  );
+}
+
 export const Route = createRootRoute({
   head: () => ({
     meta: [
@@ -20,6 +36,23 @@ export const Route = createRootRoute({
     ],
     scripts: base.scripts,
   }),
+  pendingComponent: () => <Boot title="Opening the room" body="One second…" />,
+  errorComponent: ({ error, reset }) => (
+    <Boot
+      title="Kilode hit a snag"
+      body={(error as { message?: string })?.message || "Reload and try again."}
+      action={
+        <div className="mt-4 flex justify-center gap-2">
+          <button type="button" className="rounded-lg border border-white/15 px-3 py-2 text-sm" onClick={() => reset()}>
+            Try again
+          </button>
+          <a href="/" className="rounded-lg border border-white/15 px-3 py-2 text-sm">
+            Home
+          </a>
+        </div>
+      }
+    />
+  ),
   component: () => (
     <html lang="en" suppressHydrationWarning>
       <head>

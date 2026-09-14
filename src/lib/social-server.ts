@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
@@ -11,7 +10,10 @@ function nid() {
 }
 
 function hashKey(lang: string, src: string) {
-  return createHash("sha256").update(`${lang}\n${src}`).digest("hex").slice(0, 32);
+  const s = `${lang}\n${src}`;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return `t${(h >>> 0).toString(16)}${s.length.toString(36)}`;
 }
 
 async function publicHandle(userId: string) {
