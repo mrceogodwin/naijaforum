@@ -4,7 +4,7 @@ import { seoHead } from "@/lib/seo";
 import { ACCOUNT_KINDS, fmtCount, handleColor, timeLabel } from "@/lib/qonvo-data";
 import { KilodeWord, QonvoMark } from "@/components/qonvo-mark";
 
-export const Route = createFileRoute("/u/$handle" as any)({
+export const Route = createFileRoute("/u/$handle")({
   loader: async ({ params }) => {
     const handle = String((params as { handle?: string }).handle ?? "");
     const profile = await getPublicProfile({ data: handle }).catch(() => null);

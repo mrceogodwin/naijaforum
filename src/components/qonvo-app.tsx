@@ -257,7 +257,7 @@ export function QonvoApp() {
   }
 
   return (
-    <div className="kilode-shell flex min-h-dvh flex-col bg-bg text-fg md:h-dvh md:max-h-dvh md:overflow-hidden">
+    <div className="kilode-shell flex h-full min-h-dvh flex-col bg-bg text-fg md:h-dvh md:max-h-dvh md:overflow-hidden">
       <header className="z-20 shrink-0 border-b border-line/80 bg-panel/90 backdrop-blur-md">
         <div className="flex h-12 min-w-0 items-center gap-1.5 px-2 sm:h-14 sm:gap-3 sm:px-3">
           <button
@@ -312,7 +312,7 @@ export function QonvoApp() {
             </button>
           </div>
         </div>
-        <div className="flex flex-nowrap gap-1 overflow-x-auto overscroll-x-contain border-t border-white/[0.05] px-2 py-1.5 [-ms-overflow-style:none] [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
+        <div className="flex flex-nowrap gap-1 overflow-x-auto overscroll-x-contain border-t border-line/60 px-2 py-1 [-ms-overflow-style:none] [scrollbar-width:none] md:hidden [&::-webkit-scrollbar]:hidden">
           <HomeTab label="Feeds" on={homeTab === "feeds" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("feeds"); setScreen("home"); }} />
           <HomeTab label="Chat" on={homeTab === "chat" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("chat"); setScreen("home"); }} />
           <HomeTab label="Advert" on={homeTab === "advert" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("advert"); setScreen("home"); }} />
@@ -321,8 +321,8 @@ export function QonvoApp() {
           <button type="button" className="nav-pill" onClick={() => setRoomsOpen(true)}>Rooms</button>
           <button type="button" className="nav-pill" onClick={() => setLiveOpen(true)}>Live</button>
         </div>
-        <div className="h-7 overflow-hidden border-t border-white/[0.05] bg-panel-2">
-          <div className="ticker-track px-4 text-[11px] leading-7 text-muted">
+        <div className="h-6 overflow-hidden border-t border-line/60 bg-panel-2">
+          <div className="ticker-track px-4 text-[10px] leading-6 text-muted">
             {[...ROOMS.slice(0, 12), ...ROOMS.slice(0, 12)].map((r, i) => (
               <button key={r.id + i} type="button" aria-label={`Open room ${r.name}`} className="shrink-0 hover:text-fg" onClick={() => goHome(r.id)}>
                 {r.name} · {fmt(r.online)}

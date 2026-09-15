@@ -232,11 +232,18 @@
   html,
   body,
   #app {
-    min-height: 100svh;
+    height: 100%;
     width: 100%;
+    overflow: hidden;
   }
   body {
     background-attachment: scroll;
+  }
+  .kilode-shell {
+    height: 100%;
+    min-height: 100%;
+    max-height: 100%;
+    overflow: hidden;
   }
   .ticker-track {
     animation-duration: 40s;
