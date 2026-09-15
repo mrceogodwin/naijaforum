@@ -258,7 +258,7 @@ export function QonvoApp() {
 
   return (
     <div className="kilode-shell flex min-h-dvh flex-col bg-bg text-fg md:h-dvh md:max-h-dvh md:overflow-hidden">
-      <header className="z-20 shrink-0 border-b border-white/[0.07] bg-panel/95 backdrop-blur">
+      <header className="z-20 shrink-0 border-b border-line/80 bg-panel/90 backdrop-blur-md">
         <div className="flex h-12 min-w-0 items-center gap-1.5 px-2 sm:h-14 sm:gap-3 sm:px-3">
           <button
             type="button"
@@ -289,8 +289,8 @@ export function QonvoApp() {
             <HomeTab label="Videos" on={homeTab === "videos" && screen === "home"} onClick={() => { store.setOpenPost(null); setHomeTab("videos"); setScreen("home"); }} />
           </nav>
           <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
-            <span className="hidden items-center gap-1.5 text-[11px] font-medium text-lime-2 sm:flex">
-              <span className="size-1.5 animate-pulse rounded-full bg-lime-2" />
+            <span className="hidden items-center gap-1.5 text-[11px] font-medium text-leaf sm:flex">
+              <span className="size-1.5 animate-pulse rounded-full bg-leaf" />
               Live
             </span>
             {session.isPending ? (
@@ -307,8 +307,8 @@ export function QonvoApp() {
                 </SignedOut>
               </>
             )}
-            <button type="button" className="grid size-9 place-items-center rounded-lg border border-white/10 bg-panel-2" onClick={() => setMenuOpen(true)} aria-label="Menu">
-              <Menu className="size-4 text-lime-2" />
+            <button type="button" className="grid size-9 place-items-center rounded-xl border border-line bg-panel-2" onClick={() => setMenuOpen(true)} aria-label="Menu">
+              <Menu className="size-4 text-gold" />
             </button>
           </div>
         </div>
@@ -332,7 +332,7 @@ export function QonvoApp() {
               .filter((c) => c.status === "approved")
               .flatMap((c) => [c, c])
               .map((c, i) => (
-                <span key={c.id + "t" + i} className="shrink-0 text-lime-2">
+                <span key={c.id + "t" + i} className="shrink-0 text-gold">
                   Ad · {c.name}
                 </span>
               ))}
@@ -344,9 +344,9 @@ export function QonvoApp() {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {homeTab === "feeds" ? (
             <div className="hidden shrink-0 border-b border-white/[0.05] px-4 py-3 md:block">
-              <p className="text-[11px] font-medium text-lime-2">A global forum for every conversation</p>
+              <p className="text-[11px] font-medium tracking-wide text-gold">A global forum for every conversation</p>
               <h1 className="text-xl font-extrabold tracking-tight">
-                Talk Nigeria. <span className="text-lime-2">Live.</span>
+                Talk Nigeria. <span className="text-gold-2">Live.</span>
               </h1>
             </div>
           ) : null}
@@ -507,7 +507,7 @@ export function QonvoApp() {
               ) : null}
               </div>
               <form
-                className="relative flex shrink-0 gap-2 border-t border-white/5 bg-panel p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+                className="relative flex shrink-0 gap-2 border-t border-line bg-panel/90 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur"
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!(store.authed || session.user)) {
@@ -544,8 +544,8 @@ export function QonvoApp() {
                     ))}
                   </div>
                 ) : null}
-                <button type="button" className="btn-3d grid size-11 place-items-center rounded-lg" onClick={() => setEmojiOpen((o) => !o)} aria-label="Emoji">
-                  <Smile className="size-4 text-lime-2" />
+                <button type="button" className="btn-3d grid size-11 place-items-center rounded-full" onClick={() => setEmojiOpen((o) => !o)} aria-label="Emoji">
+                  <Smile className="size-4 text-gold" />
                 </button>
                 <input
                   ref={inputRef}
@@ -556,9 +556,9 @@ export function QonvoApp() {
                   }}
                   placeholder={store.authed || session.user ? "Message + emoji" : "Sign in to chat"}
                   data-chat-input="1"
-                  className="min-h-11 flex-1 rounded-full border border-white/10 bg-white/5 px-3 text-sm outline-none"
+                  className="min-h-11 flex-1 rounded-full border border-line bg-panel-3 px-4 text-sm outline-none"
                 />
-                <button type="submit" className="btn-3d inline-flex min-h-11 shrink-0 items-center justify-center gap-1 rounded-lg px-3 text-xs font-bold">
+                <button type="submit" className="btn-join inline-flex min-h-11 shrink-0 items-center justify-center gap-1 rounded-full px-3.5 text-xs font-bold">
                   <Send className="size-3.5" />
                   Send
                 </button>
@@ -621,7 +621,7 @@ export function QonvoApp() {
         </div>
       )}
 
-      <nav className="z-20 grid shrink-0 grid-cols-5 border-t border-line bg-panel pb-[env(safe-area-inset-bottom)] md:hidden">
+      <nav className="z-20 grid shrink-0 grid-cols-5 border-t border-line bg-panel/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
         <Tab icon={<Home className="size-4" />} label="Feeds" on={screen === "home" && homeTab === "feeds"} onClick={() => { setScreen("home"); setHomeTab("feeds"); store.setOpenPost(null); }} />
         <Tab icon={<MessageSquare className="size-4" />} label="Chat" on={screen === "home" && homeTab === "chat"} onClick={() => { setScreen("home"); setHomeTab("chat"); }} />
         <Tab icon={<Megaphone className="size-4" />} label="Ads" on={screen === "home" && homeTab === "advert"} onClick={() => { setScreen("home"); setHomeTab("advert"); }} />
@@ -730,7 +730,7 @@ export function QonvoApp() {
                           screen === id ? "bg-panel-2" : "hover:bg-panel-2"
                         }`}
                       >
-                        <Icon className="size-4 shrink-0 text-lime-2" />
+                        <Icon className="size-4 shrink-0 text-gold" />
                         {label}
                       </button>
                     );
@@ -876,7 +876,7 @@ function Tab({
   onClick: () => void;
 }) {
   return (
-    <button type="button" onClick={onClick} className={`flex min-h-12 flex-col items-center justify-center gap-0.5 text-[10px] ${on ? "text-fg" : "text-muted"}`}>
+    <button type="button" onClick={onClick} className={`app-tab flex min-h-12 flex-col items-center justify-center gap-0.5 text-[10px] font-semibold ${on ? "on" : ""}`}>
       {icon}
       {label}
     </button>
@@ -913,7 +913,7 @@ function RoomList({
           type="button"
           onClick={() => onOpen(r.id)}
           className={`flex w-full items-center justify-between border-l-2 px-3 py-2 text-left ${
-            r.id === roomId ? "border-lime-2 bg-panel-2" : "border-transparent hover:bg-panel-2"
+            r.id === roomId ? "border-gold bg-panel-2" : "border-transparent hover:bg-panel-2"
           }`}
         >
           <span>

@@ -76,7 +76,7 @@ function Login() {
 
   return (
     <main className="grid min-h-svh place-items-center bg-bg p-6 text-fg">
-      <div className="w-full max-w-sm space-y-3">
+      <div className="raised w-full max-w-sm space-y-3 rounded-2xl p-5">
         <div className="flex items-center gap-2">
           <QonvoMark className="size-10" />
           <div>

@@ -37,7 +37,7 @@ export const Route = createRootRoute({
     scripts: base.scripts,
     styles: [
       {
-        children: "html,body{background:#0a0a0a;color:#eee;margin:0;min-height:100%;min-height:-webkit-fill-available}",
+        children: "html,body{background:#0a0908;color:#f3efe6;margin:0;min-height:100%;min-height:-webkit-fill-available}",
       },
     ],
   }),
@@ -63,7 +63,7 @@ export const Route = createRootRoute({
       <head>
         <HeadContent />
       </head>
-      <body className="bg-bg font-sans text-fg antialiased" style={{ background: "#0a0a0a", color: "#eeeeec", minHeight: "100dvh" }}>
+      <body className="bg-bg font-sans text-fg antialiased" style={{ background: "#0a0908", color: "#f3efe6", minHeight: "100dvh" }}>
         <PreviewHostBridge />
         <AuthProvider>
           <Outlet />
