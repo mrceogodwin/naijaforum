@@ -351,13 +351,13 @@ export function QonvoApp() {
             </div>
           ) : null}
           {homeTab === "feeds" || homeTab === "music" ? (
-            <div className="flex shrink-0 justify-end gap-1 border-b border-white/[0.05] px-2 py-1">
+            <div className="flex shrink-0 justify-end gap-1 border-b border-line px-2 py-0.5">
               {homeTab === "feeds" ? (
-                <button type="button" className="btn-join rounded-md px-2.5 py-1 text-[11px] font-bold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
+                <button type="button" className="btn-join rounded-full px-2.5 py-0.5 text-[10px] font-bold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
                   New post
                 </button>
               ) : (
-                <button type="button" className="btn-join rounded-md px-2.5 py-1 text-[11px] font-bold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
+                <button type="button" className="btn-join rounded-full px-2.5 py-0.5 text-[10px] font-bold" onClick={() => (store.authed || session.user ? setScreen("create") : (window.location.href = "/login"))}>
                   Add track
                 </button>
               )}
@@ -1273,7 +1273,7 @@ function ArticleRead({ post, store }: { post: import("@/lib/qonvo-data").Post; s
 
 function FeedPane({ store }: { store: ReturnType<typeof useQonvo> }) {
   const [cat, setCat] = useState("All");
-  const [shown, setShown] = useState(12);
+  const [shown, setShown] = useState(25);
   const open = store.posts.find((p) => p.id === store.openPost);
   const live = store.posts.filter((p) => p.status !== "draft" && (cat === "All" || p.category === cat));
   if (open) {
@@ -1281,40 +1281,40 @@ function FeedPane({ store }: { store: ReturnType<typeof useQonvo> }) {
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/5 px-2 py-1.5">
+      <div className="flex shrink-0 flex-wrap gap-1 border-b border-line px-2 py-1">
         {["All", ...POST_CATS].map((c) => (
           <button
             key={c}
             type="button"
             onClick={() => {
               setCat(c);
-              setShown(12);
+              setShown(25);
             }}
-            className={`shrink-0 rounded-full px-2 py-1 text-[10px] ${cat === c ? "btn-3d font-semibold" : "text-muted"}`}
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold tracking-wide ${cat === c ? "btn-3d text-gold-2" : "text-muted"}`}
           >
             {c}
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 pb-3">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 pb-3">
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-5">
           {live.slice(0, shown).map((p) => (
-            <button key={p.id} type="button" data-feed-card="1" className="raised overflow-hidden rounded-lg text-left" onClick={() => store.setOpenPost(p.id)}>
-              {p.image ? <img src={p.image} alt="" className="h-28 w-full object-cover" /> : <div className="h-28 bg-panel-3" />}
-              <div className="p-2">
-                <div className="text-[9px] font-bold tracking-wide text-lime-2 uppercase">{p.category || "General"}</div>
-                <div className="mt-0.5 line-clamp-2 text-xs font-semibold leading-snug">{p.title}</div>
-                <p className="mt-1 line-clamp-2 text-[10px] text-muted">{p.excerpt || p.body}</p>
-                <div className="mt-1 truncate text-[9px]">
+            <button key={p.id} type="button" data-feed-card="1" className="raised overflow-hidden rounded-md text-left" onClick={() => store.setOpenPost(p.id)}>
+              {p.image ? <img src={p.image} alt="" className="h-16 w-full object-cover sm:h-[4.5rem]" /> : <div className="h-16 bg-panel-3 sm:h-[4.5rem]" />}
+              <div className="px-1.5 py-1">
+                <div className="text-[8px] font-bold tracking-[0.12em] text-gold uppercase">{p.category || "General"}</div>
+                <div className="mt-px line-clamp-2 text-[10px] font-semibold leading-tight">{p.title}</div>
+                <p className="mt-px line-clamp-1 text-[8px] text-muted">{p.excerpt || p.body}</p>
+                <div className="mt-px truncate text-[8px]">
                   <span style={{ color: handleColor(p.author) }}>{p.author}</span>
-                  <span className="text-muted"> · {timeLabel(p.ts)} · {fmtCount(p.views ?? 0)} views</span>
+                  <span className="text-muted"> · {timeLabel(p.ts)} · {fmtCount(p.views ?? 0)}</span>
                 </div>
               </div>
             </button>
           ))}
         </div>
         {shown < live.length ? (
-          <button type="button" className="btn-3d mx-auto mt-3 block rounded-md px-4 py-1.5 text-[11px] font-semibold" onClick={() => setShown((n) => n + 6)}>
+          <button type="button" className="btn-3d mx-auto mt-2 block rounded-md px-3 py-1 text-[10px] font-semibold" onClick={() => setShown((n) => n + 10)}>
             Load more
           </button>
         ) : null}
@@ -1336,29 +1336,29 @@ function AdvertPane({ ads, onCreate, onView }: { ads: Campaign[]; onCreate: () =
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 pb-3">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-5">
           {live.slice(0, shown).map((a) => {
             const yt = a.video ? youtubeId(a.video) || a.video : undefined;
             const inner = (
-              <div className="raised overflow-hidden rounded-lg text-left">
+              <div className="raised overflow-hidden rounded-md text-left">
                 {a.kind === "video" || a.kind === "video-text" ? (
                   yt ? (
-                    <img src={`https://i.ytimg.com/vi/${yt}/hqdefault.jpg`} alt="" className="h-28 w-full object-cover" />
+                    <img src={`https://i.ytimg.com/vi/${yt}/hqdefault.jpg`} alt="" className="h-16 w-full object-cover" />
                   ) : (
-                    <div className="grid h-28 place-items-center bg-panel-3 text-[10px] text-muted">Video</div>
+                    <div className="grid h-16 place-items-center bg-panel-3 text-[9px] text-muted">Video</div>
                   )
                 ) : a.image ? (
-                  <img src={a.image} alt="" className="h-28 w-full object-cover" />
+                  <img src={a.image} alt="" className="h-16 w-full object-cover" />
                 ) : (
-                  <div className="grid h-28 place-items-center bg-panel-3 px-2 text-center text-[11px] font-semibold">{a.name}</div>
+                  <div className="grid h-16 place-items-center bg-panel-3 px-1.5 text-center text-[10px] font-semibold">{a.name}</div>
                 )}
-                <div className="p-2">
-                  <div className="text-[9px] font-bold tracking-wide text-lime-2 uppercase">{a.kind || "image-text"}</div>
-                  <div className="mt-0.5 line-clamp-2 text-xs font-semibold">{a.name}</div>
+                <div className="px-1.5 py-1">
+                  <div className="text-[8px] font-bold tracking-wide text-gold uppercase">{a.kind || "image-text"}</div>
+                  <div className="mt-px line-clamp-2 text-[10px] font-semibold leading-tight">{a.name}</div>
                   {a.kind === "image-text" || a.kind === "video-text" || a.kind === "text" ? (
-                    <p className="mt-1 line-clamp-2 text-[10px] text-muted">{a.note}</p>
+                    <p className="mt-px line-clamp-1 text-[8px] text-muted">{a.note}</p>
                   ) : null}
-                  <div className="mt-1 text-[9px] text-muted">{fmtCount(a.views ?? 0)} views</div>
+                  <div className="mt-px text-[8px] text-muted">{fmtCount(a.views ?? 0)}</div>
                 </div>
               </div>
             );

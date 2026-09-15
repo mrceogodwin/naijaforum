@@ -59,17 +59,17 @@ function Forum({ store, onHome }: { store: Store; onHome: (roomId?: string) => v
     <div className="mx-auto max-w-5xl space-y-3 p-5">
       <h2 className="text-xl font-bold">Forum</h2>
       {live.length === 0 ? <p className="text-sm text-muted">No posts yet. Create one from Menu.</p> : null}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-5">
         {live.map((p) => (
-          <button key={p.id} type="button" onClick={() => { store.setOpenPost(p.id); onHome(); }} className="raised overflow-hidden rounded-lg text-left">
-            {p.image ? <img src={p.image} alt="" className="h-28 w-full object-cover" /> : <div className="h-28 bg-panel-3" />}
-            <div className="p-2">
-              <div className="text-[9px] font-bold tracking-wide text-lime-2 uppercase">{p.category || "General"}</div>
-              <div className="mt-0.5 line-clamp-2 text-xs font-semibold">{p.title}</div>
-              <p className="mt-1 line-clamp-2 text-[10px] text-muted">{p.excerpt || p.body}</p>
-              <div className="mt-1 text-[9px]">
+          <button key={p.id} type="button" onClick={() => { store.setOpenPost(p.id); onHome(); }} className="raised overflow-hidden rounded-md text-left">
+            {p.image ? <img src={p.image} alt="" className="h-16 w-full object-cover" /> : <div className="h-16 bg-panel-3" />}
+            <div className="px-1.5 py-1">
+              <div className="text-[8px] font-bold tracking-wide text-gold uppercase">{p.category || "General"}</div>
+              <div className="mt-px line-clamp-2 text-[10px] font-semibold leading-tight">{p.title}</div>
+              <p className="mt-px line-clamp-1 text-[8px] text-muted">{p.excerpt || p.body}</p>
+              <div className="mt-px text-[8px]">
                 <span style={{ color: handleColor(p.author) }}>{p.author}</span>
-                <span className="text-muted"> · {timeLabel(p.ts)} · {fmtCount(p.views ?? 0)} views</span>
+                <span className="text-muted"> · {timeLabel(p.ts)} · {fmtCount(p.views ?? 0)}</span>
               </div>
             </div>
           </button>
